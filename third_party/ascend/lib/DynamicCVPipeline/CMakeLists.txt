@@ -1,6 +1,9 @@
-file(GLOB PLAN_COMPUTE_BLOCK_SRC_FILES CONFIGURE_DEPENDS
-    "PlanComputeBlock/*.cpp"
-    "Common/*.cpp"
+file(GLOB PLAN_COMPUTE_BLOCK_PASS_SRC
+  "PlanComputeBlock/*.cpp"
+)
+
+file(GLOB COMMON_SRC
+  "Common/*.cpp"
 )
 
 file(GLOB SPLIT_DATAFLOW_SRC_FILES CONFIGURE_DEPENDS
@@ -22,6 +25,8 @@ file(GLOB ADD_CONTROLFLOW_CONDITION_SRC_FILES CONFIGURE_DEPENDS
 add_triton_library(DynamicCVPipeline
   AddDynamicCVPipeline.cpp
   PlanComputeBlock.cpp
+  ${PLAN_COMPUTE_BLOCK_PASS_SRC}
+  ${COMMON_SRC}
   SplitDataflow.cpp
   SeparateMemoryFromComputePass.cpp
   AllocMultiCache.cpp

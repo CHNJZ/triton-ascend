@@ -25,20 +25,20 @@
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/PlanCubeBlockPass.h"
 #include "mlir/Pass/PassManager.h"
 #include "llvm/Support/Debug.h"
-
-static constexpr const char *DEBUG_TYPE = "PlanComputeBlock";
-#define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
-#define LDBG(X) LLVM_DEBUG(DBGS() << (X) << "\n")
+#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Passes.h"
 
 using namespace mlir;
 using namespace triton;
+
+#define DEBUG_TYPE "plan-compute-block"
+#define LOG_DEBUG(msg) LLVM_DEBUG(llvm::dbgs() << " [" << DEBUG_TYPE << "] " << (msg) << "\n")
 
 // Run the pass
 void PlanComputeBlockPass::runOnOperation()
 {
     ModuleOp module = getOperation();
     OpPassManager pm(module.getOperationName());
-    LDBG("Enter pass.");
+    LOG_DEBUG("Enter pass.");
 
     // Step 1: Run OpClassifierPass to classify operations
     pm.addPass(createOpClassifierPass());
@@ -47,6 +47,7 @@ void PlanComputeBlockPass::runOnOperation()
     pm.addPass(createPlanCubeBlockPass());
 
     // Step 3: Partition compute blocks for core_type=vector
+    pm.addPass(createPlanVectorBlockPass());
 
     // Step 4: Reorder
 
@@ -55,7 +56,7 @@ void PlanComputeBlockPass::runOnOperation()
         signalPassFailure();
     }
 
-    LDBG("Process successfully");
+    LOG_DEBUG("Process successfully");
 }
 namespace mlir {
 namespace triton {
