@@ -33,59 +33,66 @@ namespace mlir {
 namespace triton {
 
 // ============================================================================
-// Data structures
+// 数据结构
 // ============================================================================
 
-/// Transfer op chain (for sender or receiver side)
+/// 传输操作链（用于发端或收端）
 struct TransferOpChain {
-    Operation *waitOp = nullptr;
-    Operation *transferOp = nullptr;
-    Operation *toTensorOp = nullptr;
-    Operation *setOp = nullptr;
+    Operation *waitOp = nullptr;           // sync_block_wait
+    Operation *transferOp = nullptr;        // fixpipe / hir.copy / memory_space_cast / convert_layout
+    Operation *toTensorOp = nullptr;       // bufferization.to_tensor (仅 memspacecast 场景有)
+    Operation *setOp = nullptr;             // sync_block_set
 };
 
-/// Buffer alloc pair
+/// Buffer alloc 对
 struct BufferAllocPair {
     Operation *allocOp = nullptr;
     Operation *markOp = nullptr;
 };
 
-/// Complete transfer group info
+/// 传输组完整信息
 struct TransferGroupInfo {
     int tid = -1;
-    int originalFlag = -1;
-    int outputFlag = -1;
-    bool isCtoV = false;
+    int originalFlag = -1;      // 原始 flag
+    int outputFlag = -1;          // 新分配的 output flag
+    bool isCtoV = false;        // true=C→V, false=V→C
 
-    BufferAllocPair senderBuf;
-    BufferAllocPair receiverBuf;
+    BufferAllocPair senderBuf;   // 发送端 buffer (producer)
+    BufferAllocPair receiverBuf; // 接收端 buffer (consumer)
 
-    TransferOpChain senderChain;
-    TransferOpChain receiverChain;
+    TransferOpChain senderChain;   // 发送端操作链
+    TransferOpChain receiverChain; // 接收端操作链
 
-    Value senderInputBuffer;
-    Value senderOutputBuffer;
-    Value receiverInputBuffer;
-    Value receiverOutputBuffer;
+    // Input/output buffer values (for later steps)
+    Value senderInputBuffer;      // sender input buffer (original)
+    Value senderOutputBuffer;      // sender output buffer (newly created)
+    Value receiverInputBuffer;    // receiver input buffer (original)
+    Value receiverOutputBuffer;    // receiver output buffer (newly created)
 
+    // TCB ID: 同一 tid 组的所有 buffer（共 4 个：sender input/output + receiver input/output）共用一个 tcb_id
     int tcbId = -1;
 
-    Operation *extraSyncSetOp = nullptr;
-    Operation *extraSyncWaitOp = nullptr;
+    // Extra sync 位置（用于 output flag 同步）
+    Operation *extraSyncSetOp = nullptr;  // extra set op 的位置（插入点）
+    Operation *extraSyncWaitOp = nullptr;  // extra wait op 的位置（插入点）
 };
 
-/// AddMultiBufferOuterScopePass for outer (CV inter-core) multi-buffer optimization
+/// AddMultiBufferOuterScopePass for adding outer (CV inter-core) multi-buffer optimization
 class AddMultiBufferOuterScopePass
     : public PassWrapper<AddMultiBufferOuterScopePass, OperationPass<ModuleOp>> {
 public:
     MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(AddMultiBufferOuterScopePass)
 
+    // Constructor
     AddMultiBufferOuterScopePass() = default;
 
+    // Pass argument
     StringRef getArgument() const override { return "add_multi_buffer_outer_scope"; }
 
+    // Run the pass
     void runOnOperation() override;
 
+    // Get dependent dialects
     void getDependentDialects(DialectRegistry &registry) const override;
 };
 
