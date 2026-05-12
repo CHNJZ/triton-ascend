@@ -182,28 +182,44 @@ LogicalResult CloneOpsPass::cloneOpsInMainLoop(scf::ForOp forOp)
 // Check if an op should be erased during cleanup (for cube)
 static bool shouldEraseOpForCube(Operation *op)
 {
-  if (auto ifOp = dyn_cast<scf::IfOp>(op)) {
-    if (ifOp->hasAttr("ssbuffer.cross_buffer") || ifOp->hasAttr("ssbuffer.intra_buffer") ||
-        ifOp->hasAttr("ssbuffer.load_store")) {
-      return true;
-    }
-  }
-
   if (isa<SyncBlockWaitOp>(op) || isa<SyncBlockSetOp>(op) ||
       isa<hivm::FixpipeOp>(op)) {
     return true;
   }
 
-  // Copy and fill ops: erase if operand not used elsewhere
-  if (isa<memref::CopyOp>(op) || (isa<linalg::FillOp>(op) && op->getNumResults() == 0)) {
-    if (op->getNumOperands() >  1) {
-      Value secondOperand = op->getOperand(1);
-      bool usedByOtherOp = llvm::any_of(secondOperand.getUsers(), [&](Operation *user) {
-        return user != op;
-      });
-      if (!usedByOtherOp) {
-        return true;
+   // Copy ops: erase only if operand(1) is not used by other ops
+  // and operand(1)'s defining subview op (if any) has source not used elsewhere
+  if (isa<memref::CopyOp>(op) && op->getNumOperands() > 1) {
+    Value secondOperand = op->getOperand(1);
+    bool usedByOtherOp = llvm::any_of(secondOperand.getUsers(), [&](Operation *user) {
+      return user != op;
+    });
+    if (usedByOtherOp) {
+      return false;
+    }
+    // Check if operand(1)'s defining op is subview and its source operand is used elsewhere
+    if (auto *defOp = secondOperand.getDefiningOp()) {
+      if (auto subviewOp = dyn_cast<memref::SubViewOp>(defOp)) {
+        Value source = subviewOp.getSource();
+        bool sourceUsedByOther = llvm::any_of(source.getUsers(), [&](Operation *user) {
+          return user != subviewOp;
+        });
+        if (sourceUsedByOther) {
+          return false;
+        }
       }
+    }
+    return true;
+  }
+
+  // Fill ops: erase if operand not used elsewhere
+  if (isa<linalg::FillOp>(op) && op->getNumResults() == 0 && op->getNumOperands() > 1) {
+    Value secondOperand = op->getOperand(1);
+    bool usedByOtherOp = llvm::any_of(secondOperand.getUsers(), [&](Operation *user) {
+      return user != op;
+    });
+    if (!usedByOtherOp) {
+      return true;
     }
   }
 
@@ -214,14 +230,8 @@ static bool shouldEraseOpForCube(Operation *op)
 // Check if an op should be erased (for vector)
 static bool shouldEraseOpForVector(Operation *op)
 {
-  if (auto ifOp = dyn_cast<scf::IfOp>(op)) {
-    if (ifOp->hasAttr("ssbuffer.cross_buffer") || ifOp->hasAttr("ssbuffer.intra_buffer") ||
-        ifOp->hasAttr("ssbuffer.load_store")) {
-      return true;
-    }
-  }
-
-  return llvm::none_of(op->getResults(), [](auto result) { return !result.use_empty(); });
+  return llvm::none_of(op->getResults(),
+                       [](auto result) { return !result.use_empty(); });
 }
 
 // Cleanup for cloned ops in a forOp
@@ -370,8 +380,10 @@ void CloneOpsPass::runOnOperation()
   LDBG("before cloneOps:\n" << module << "\n");
 
   // Validate block_ids are consecutive before cloning
-  if (failed(validateBlockIdsConsecutive(module)))
+  if (failed(validateBlockIdsConsecutive(module))) {
+    signalPassFailure();
     return;
+  }
 
   // Clone ops in vector/cube to ensure that each block_id has its own
   // ops without sharing
