@@ -59,8 +59,9 @@ void AddBlockIdForControlOpsPass::runOnOperation()
 
     if (isa<scf::ForOp, scf::IfOp, scf::WhileOp>(op)) {
       maxBlockId++;
+      static constexpr int kIntegerBitWidth = 32;
       op->setAttr("ssbuffer.block_id",
-                  IntegerAttr::get(IntegerType::get(module.getContext(), 32), maxBlockId));
+                  IntegerAttr::get(IntegerType::get(module.getContext(), kIntegerBitWidth), maxBlockId));
       LOG_DEBUG("Added block_id " << maxBlockId << " to " << *op << "\n");
     }
   });
