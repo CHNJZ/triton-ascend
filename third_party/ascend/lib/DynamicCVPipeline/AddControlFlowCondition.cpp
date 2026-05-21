@@ -47,54 +47,25 @@ using namespace mlir;
 using namespace triton;
 
 // Check if the module should be skipped for control flow condition processing
-static bool shouldSkipControlFlowCondition(ModuleOp module)
+static LogicalResult verifyControlFlowPrerequisites(ModuleOp module)
 {
-  int cubeScopeCount = 0;
-  int vectorScopeCount = 0;
-
-  module.walk([&](scope::ScopeOp scopeOp) {
-    auto attr = scopeOp->getAttrOfType<hivm::TCoreTypeAttr>("hivm.tcore_type");
-    if (!attr) {
-      return;
-    }
-    if (attr.getTcoretype() == hivm::TCoreType::CUBE) {
-      ++cubeScopeCount;
-    } else if (attr.getTcoretype() == hivm::TCoreType::VECTOR) {
-      ++vectorScopeCount;
-    }
-  });
-
-  // If either CUBE or VECTOR scope is missing, skip processing
-  if (cubeScopeCount == 0 || vectorScopeCount == 0) {
-    LDBG("CUBE or VECTOR scope missing, skip processing.");
-    return true;
-  }
-
   // Check if scopeOp has ssbuffer.skip
   bool hasSkipAttr = false;
-  module.walk([&](scope::ScopeOp scopeOp) {
+  module.walk([&](Operation *op) {
+    auto scopeOp = dyn_cast<scope::ScopeOp>(op);
+    if (!scopeOp) {
+      return;
+    }
     if (scopeOp->hasAttr("ssbuffer.skip")) {
       hasSkipAttr = true;
     }
   });
   if (hasSkipAttr) {
     LDBG("scopeOp has ssbuffer.skip, skip processing.");
-    return true;
+    return failure();
   }
 
-  // Only skip if ALL forOps lack main_loop attr
-  bool hasMainLoopForOp = false;
-  module.walk([&](scf::ForOp forOp) {
-    if (forOp->hasAttr("ssbuffer.main_loop")) {
-      hasMainLoopForOp = true;
-    }
-  });
-  if (!hasMainLoopForOp) {
-    LDBG("All forOps lack ssbuffer.main_loop, skip processing.");
-    return true;
-  }
-
-  return false;
+  return success();
 }
 
 void AddControlFlowConditionPass::runOnOperation()
@@ -103,7 +74,7 @@ void AddControlFlowConditionPass::runOnOperation()
 
   LDBG("Enter add controlflow condition pass.");
 
-  if (shouldSkipControlFlowCondition(module)) {
+  if (failed(verifyControlFlowPrerequisites(module))) {
     return;
   }
 
