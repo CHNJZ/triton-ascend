@@ -74,6 +74,24 @@ The **visualize_data.bin** file can be visualized on MindStudio Insight.
   - Note: For details about the result data of the following collection items, see [Operator Optimization](https://www.hiascend.com/document/detail/zh/mindstudio/82RC1/GUI_baseddevelopmenttool/msascendinsightug/Insight_userguide_0068.html) in *MindStudio Insight*.
   ![alt text](../figures/visualize_data_with_insight.png)
 
+#### Building a Debug Version of a Triton Kernel for Simulation Pipeline Profiling
+
+By default, the simulation pipeline files (`trace.json` / `visualize_data.bin`) contain only instruction addresses and instruction names. To use the instruction-correlation panel in MindStudio Insight — i.e. to view the Triton/Python source line and call stack associated with each instruction (Method 4 in [Locating Bottlenecks](#locating-bottlenecks)) — the kernel must be built with `debug_line` debug information. When this is disabled, `msprof op simulator` emits the following warnings and the code-correlation files are empty:
+
+```text
+[WARN] Kernel missed debug_line information. If you need code call stack, please recompile kernel with -g option
+[WARN] Code call stack is empty
+[WARN] Lack of code info of files
+```
+
+A Triton kernel does not need a manual `-g`. The triton-ascend backend controls whether `--enable-debug-info=true` is appended to the `bishengir-compile` command via the environment variable `TRITON_DISABLE_LINE_INFO`. Note that triton-ascend defaults this to `true` (i.e. line-number information is **off** by default, the opposite of upstream Triton, which enables it by default), so it must be set to `false` explicitly:
+
+```bash
+export TRITON_DISABLE_LINE_INFO=false
+```
+
+To verify it took effect: the `[DEBUG] cmd_list:` line in the log should now include `--enable-debug-info=true`, and the `Kernel missed debug_line information` warning should disappear. After that, import `visualize_data.bin` into MindStudio Insight to view the source line and call stack associated with each instruction in the instruction timeline.
+
 ## Analyzing Performance Data
 
 ### Theoretical Parameters
