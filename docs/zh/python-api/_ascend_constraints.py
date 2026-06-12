@@ -740,6 +740,12 @@ CONSTRAINTS = {
         ],
         "example": "triton.language.static_print",
     },
+    "triton.language.static_assert": {
+        "constraints": [
+            "``cond``: must be a compile-time constant (tl.constexpr); a non-constant condition causes a compilation error.",
+        ],
+        "example": "triton.language.static_assert",
+    },
     "triton.language.static_range": {
         "constraints": [
             "DataType: Ascend does not support uint16, uint32, uint64, uint8 (hardware limitation).",
