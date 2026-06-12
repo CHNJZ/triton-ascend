@@ -478,9 +478,9 @@ CONSTRAINTS = {
     "triton.language.inline_asm_elementwise": {
         "constraints": [
             "DataType: Ascend does not support bf16, bool, fp16, fp64, uint16, uint32, uint64, uint8 (hardware limitation).",
-            "内联汇编寄存器仅支持 int64(s64) 和 float32(f32)",
-            "约束限制仅支持 'l'（LLVM 约束）",
-            "目前仅支持输入一维张量，计算高维张量需展开",
+            "Inline assembly registers only support int64 (s64) and float32 (f32).",
+            "Only the 'l' LLVM constraint is supported.",
+            "Only 1-D input tensors are supported; higher-dimensional tensors must be flattened.",
         ],
         "example":
         "triton.language.inline_asm_elementwise",
