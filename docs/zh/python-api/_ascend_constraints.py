@@ -110,6 +110,9 @@ CONSTRAINTS = {
         "example":
         "triton.language.associative_scan",
     },
+    "triton.language.assume": {
+        "example": "triton.language.assume",
+    },
     "triton.language.atomic_add": {
         "constraints": [
             "DataType: Ascend does not support fp64, int64 (hardware limitation).",
