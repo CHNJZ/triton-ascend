@@ -263,6 +263,9 @@ CONSTRAINTS = {
         ],
         "example": "triton.language.cumsum",
     },
+    "triton.language.debug_barrier": {
+        "example": "triton.language.debug_barrier",
+    },
     "triton.language.device_print": {
         "constraints": [
             "DataType: Ascend does not support fp64, uint16, uint32, uint64, uint8 (hardware limitation).",
