@@ -266,11 +266,14 @@ CONSTRAINTS = {
     "triton.language.debug_barrier": {
         "example": "triton.language.debug_barrier",
     },
+    "triton.language.device_assert": {
+        "example": "triton.language.device_assert",
+    },
     "triton.language.device_print": {
         "constraints": [
             "DataType: Ascend does not support fp64, uint16, uint32, uint64, uint8 (hardware limitation).",
-            "device_print 只能打印参与运算的结果值，无法打印纯粹用于访存的 offset 变量（编译器优化掉）",
-            "特定情况下 device_print 会展开辅助 DMA 代码导致底层报错，功能优化中",
+            "``prefix``: the first argument must be a string prefix; omitting it causes a compilation error.",
+            "Set environment variable ``TRITON_DEVICE_PRINT=1`` to enable.",
         ],
         "example":
         "triton.language.device_print",
