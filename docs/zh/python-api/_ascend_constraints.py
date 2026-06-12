@@ -569,6 +569,8 @@ CONSTRAINTS = {
     "triton.language.max_constancy": {
         "constraints": [
             "DataType: Ascend does not support fp64, uint16, uint32, uint64, uint8 (hardware limitation).",
+            "``values``: rank must match the rank of ``input`` (e.g. ``[1, 1]`` for a 2-D input).",
+            "Note the dimensionality reduction that occurs when the last dimension of the shape is 1.",
         ],
         "example": "triton.language.max_constancy",
     },
