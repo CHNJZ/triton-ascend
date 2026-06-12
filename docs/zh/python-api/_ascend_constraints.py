@@ -608,6 +608,13 @@ CONSTRAINTS = {
         "example":
         "triton.language.mod",
     },
+    "triton.language.multiple_of": {
+        "constraints": [
+            "DataType: Ascend does not support fp64, uint16, uint32, uint64, uint8 (hardware limitation).",
+            "``values``: describes the divisibility of the first value along each dimension, so its rank must match ``input`` (e.g. ``[1, 1]`` for a 2-D input).",
+        ],
+        "example": "triton.language.multiple_of",
+    },
     "triton.language.neg": {
         "constraints": [
             "DataType: Ascend does not support bool, fp64, uint16, uint32, uint64 (hardware limitation).",
