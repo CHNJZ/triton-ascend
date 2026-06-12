@@ -728,6 +728,7 @@ CONSTRAINTS = {
     "triton.language.static_range": {
         "constraints": [
             "DataType: Ascend does not support uint16, uint32, uint64, uint8 (hardware limitation).",
+            "``start``, ``end``, ``step`` must be compile-time constants (tl.constexpr).",
         ],
         "example": "triton.language.static_range",
     },
