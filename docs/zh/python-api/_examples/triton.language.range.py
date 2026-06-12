@@ -1,6 +1,3 @@
-import triton.language as tl
-
-
 @triton.jit
 def basic_examples():
     # Single argument: 0 to 9

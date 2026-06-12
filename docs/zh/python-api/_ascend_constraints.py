@@ -645,10 +645,8 @@ CONSTRAINTS = {
     "triton.language.range": {
         "constraints": [
             "DataType: Ascend does not support uint16, uint32, uint64, uint8 (hardware limitation).",
-            "``disallow_acc_multi_buffer``: Ascend 上相关功能不全",
-            "``flatten``: Ascend 上相关功能不全",
-            "``warp_specialize``: 仅 Blackwell GPU 支持，Ascend 无效",
-            "``disable_licm``: Ascend 上相关功能不全",
+            "``disallow_acc_multi_buffer``, ``flatten``, ``disable_licm``: related functionality is incomplete on Ascend.",
+            "``warp_specialize``: only supported on Blackwell GPU; has no effect on Ascend.",
         ],
         "example":
         "triton.language.range",
