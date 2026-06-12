@@ -1,12 +1,36 @@
+import pytest
+import torch
+import torch_npu
+from torch.testing import assert_close
+
+import triton
+import triton.language as tl
+
+
 @triton.jit
-def basic_assume_example(x_ptr, y_ptr, BLOCK_SIZE: tl.constexpr):
+def assume_kernel(x_ptr, y_ptr, out_ptr, BLOCK_SIZE: tl.constexpr):
     # Assume BLOCK_SIZE is a power of 2 so the compiler can optimize the division
     tl.assume((BLOCK_SIZE & (BLOCK_SIZE - 1)) == 0)
-
     offsets = tl.arange(0, BLOCK_SIZE)
     x = tl.load(x_ptr + offsets)
     y = tl.load(y_ptr + offsets)
+    out = x // BLOCK_SIZE + y % BLOCK_SIZE
+    tl.store(out_ptr + offsets, out)
 
-    # Knowing BLOCK_SIZE is a power of 2, the compiler can lower the division into a shift
-    result = x // BLOCK_SIZE + y % BLOCK_SIZE
-    tl.store(y_ptr + offsets, result)
+
+@pytest.mark.parametrize("BLOCK_SIZE", [128])
+def test_assume(BLOCK_SIZE):
+    x = torch.randint(0, 1000, (BLOCK_SIZE,), device="npu", dtype=torch.int32)
+    y = torch.randint(0, 1000, (BLOCK_SIZE,), device="npu", dtype=torch.int32)
+    out = torch.empty(BLOCK_SIZE, device="npu", dtype=torch.int32)
+
+    assume_kernel[(1,)](x, y, out, BLOCK_SIZE=BLOCK_SIZE)
+    torch.npu.synchronize()
+
+    ref = x // BLOCK_SIZE + y % BLOCK_SIZE
+    assert_close(out, ref)
+
+
+if __name__ == "__main__":
+    test_assume(128)
+    print("test_assume PASSED!")
