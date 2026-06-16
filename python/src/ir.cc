@@ -283,6 +283,19 @@ void init_triton_ir(py::module &&m) {
       });
 
   py::class_<Location>(m, "location", py::module_local())
+      .def("set_name",
+           [](Location &self, std::string &name) {
+             mlir::StringAttr nameAttr =
+                 mlir::StringAttr::get(self.getContext(), name);
+             mlir::NameLoc nameLoc = mlir::NameLoc::get(nameAttr, self);
+             self = dyn_cast<Location>(nameLoc);
+           })
+      .def("get_name",
+           [](Location &self) -> std::optional<std::string> {
+             if (auto nameLoc = dyn_cast<NameLoc>(self))
+               return nameLoc.getName().str();
+             return std::nullopt;
+           })
       .def("__str__", [](Location &self) {
         std::string str;
         llvm::raw_string_ostream os(str);
@@ -312,6 +325,9 @@ void init_triton_ir(py::module &&m) {
              self.replaceAllUsesWith(newValue);
            })
       .def("get_type", &Value::getType)
+      .def("set_loc",
+           [](Value &self, Location loc) { return self.setLoc(loc); })
+      .def("get_loc", [](Value &self) { return self.getLoc(); })
       .def("id", [](Value &self) {
         // The Value is identified by and compared with
         // other Values via the underlying ValueImpl
@@ -320,7 +336,9 @@ void init_triton_ir(py::module &&m) {
 
   py::class_<OpResult, Value>(m, "op_result", py::module_local());
 
-  py::class_<BlockArgument, Value>(m, "block_argument", py::module_local());
+  py::class_<BlockArgument, Value>(m, "block_argument", py::module_local())
+      .def("get_loc", &BlockArgument::getLoc)
+      .def("set_loc", &BlockArgument::setLoc);
 
   py::class_<Region>(m, "region", py::module_local())
       .def("get_parent_region", &Region::getParentRegion, ret::reference)
@@ -867,6 +885,22 @@ void init_triton_ir(py::module &&m) {
               int column) { self.setLastLoc(fileName, line, column); })
       .def("get_loc",
            [](TritonOpBuilder &self) -> Location { return self.getLastLoc(); })
+      .def("create_loc",
+           [](TritonOpBuilder &self, const std::string &fileName, int line,
+              int column) -> Location {
+             return mlir::FileLineColLoc::get(self.getContext(), fileName, line,
+                                              column);
+           })
+      .def(
+          "create_name_loc",
+          [](TritonOpBuilder &self, std::string name,
+             std::optional<Location> childLoc) -> Location {
+            auto nameAttr = StringAttr::get(self.getContext(), name);
+            if (childLoc)
+              return NameLoc::get(nameAttr, *childLoc);
+            return NameLoc::get(nameAttr);
+          },
+          py::arg("name"), py::arg("child_loc") = py::none())
 
       // Ops
       .def("get_or_insert_function",

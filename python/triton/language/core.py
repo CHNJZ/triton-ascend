@@ -760,6 +760,9 @@ class tensor(_value):
         # ex. "float32[16, 32]"
         return str(self.dtype) + '[' + ', '.join(str(s) for s in self.shape) + ']'
 
+    def _set_name(self, builder, name):
+        self.handle.set_loc(builder.create_name_loc(name, self.handle.get_loc()))
+
     @builtin
     def __add__(self, other, _builder=None):
         return add(self, other, sanitize_overflow=False, _builder=_builder)
