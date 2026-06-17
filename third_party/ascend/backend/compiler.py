@@ -64,13 +64,25 @@ from triton.backends.compiler import (
     GPUTarget,
 )
 from triton.runtime import driver
-from triton.runtime.cache import get_dump_manager
+from triton.runtime.cache import _base32, get_dump_manager
 from triton.tools.get_ascend_devices import is_compile_on_910_95
 
 
 # TODO: materialize the concrete min shape
 def min_dot_size(target: GPUTarget):
     return lambda lhsType, rhsType: (1, 1, 1)
+
+
+def _get_dump_paths(hash_key: str, src_path: str, dst_path: str) -> Tuple[str, str]:
+    """
+    If TRITON_DUMP_DIR is set, return paths under that directory.
+    Otherwise, return the original src_path and dst_path.
+    """
+    dump_dir_env = os.getenv("TRITON_DUMP_DIR")
+    if dump_dir_env:
+        dump_dir = os.path.join(dump_dir_env, _base32(hash_key))
+        return (os.path.join(dump_dir, os.path.basename(src_path)), os.path.join(dump_dir, os.path.basename(dst_path)))
+    return (src_path, dst_path)
 
 
 def make_ttir(mod, metadata, opt):
@@ -158,9 +170,10 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         if opt.debug:
             # Print the equivalent triton-opt command line so the pass
             # pipeline can be reproduced and debugged outside of Python.
+            print_src_path, print_dst_path = _get_dump_paths(metadata["hash"], src_path, dst_path)
             cmd = [
-                _get_triton_opt_path(), src_path, f"--pass-pipeline={pm.get_pipeline_str()}", "--mlir-print-debuginfo",
-                "-o", dst_path
+                _get_triton_opt_path(), print_src_path, f"--pass-pipeline={pm.get_pipeline_str()}",
+                "--mlir-print-debuginfo", "-o", print_dst_path
             ]
             print(f"[DEBUG] cmd list: {shlex.join(cmd)}")
 
@@ -547,7 +560,9 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             cmd_list += [f"--hfusion-enable-multiple-consumer-fusion={hfusion_enable_multiple_consumer_fusion}"]
 
         if opt.debug:
-            print(f"[DEBUG] cmd_list: {' '.join(cmd_list)}")
+            print_cmd_list = cmd_list.copy()
+            print_cmd_list[1], print_cmd_list[-1] = _get_dump_paths(metadata["hash"], ttadapter_path, bin_file)
+            print(f"[DEBUG] cmd_list: {shlex.join(print_cmd_list)}")
 
         try:
             ret = subprocess.run(cmd_list, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
@@ -741,9 +756,13 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
         if opt.debug:
             _compile_option_list += ["--mlir-print-ir-after-failure"]
             _compile_option_list += ["--bishengir-print-ir-after=hivm-graph-sync-solver"]
+
         cmd_list = ([npu_compiler_path, ttadapter_path] + _compile_option_list + ["-o", bin_file])
+
         if opt.debug:
-            print(f"[DEBUG] cmd_list: {' '.join(cmd_list)}")
+            print_cmd_list = cmd_list.copy()
+            print_cmd_list[1], print_cmd_list[-1] = _get_dump_paths(metadata["hash"], ttadapter_path, bin_file)
+            print(f"[DEBUG] cmd_list: {shlex.join(print_cmd_list)}")
 
         try:
             ret = subprocess.run(cmd_list, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
