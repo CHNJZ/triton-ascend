@@ -15,6 +15,8 @@ add_triton_library(TritonToLinalg
         DescriptorConverter
         MarkTensorKindPass.cpp
         DevicePrintOffsetRewrite.cpp
+        CanonicalizeDebugLocationsPass.cpp
+        DeduplicateDebugNopsPass.cpp
 
   DEPENDS
   TritonToLinalgConversionPassIncGen
@@ -34,4 +36,5 @@ add_triton_library(TritonToLinalg
   MLIRTritonNPUUtils
   MLIRSCFTransforms
   MLIRLinalgTransforms
+  MLIRLLVMDialect
 )

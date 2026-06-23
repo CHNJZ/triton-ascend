@@ -76,7 +76,8 @@ void TritonToStructuredPass::getDependentDialects(DialectRegistry &registry) con
   registry.insert<func::FuncDialect, arith::ArithDialect, math::MathDialect,
                   linalg::LinalgDialect, affine::AffineDialect, scf::SCFDialect,
                   tensor::TensorDialect, bufferization::BufferizationDialect,
-                  memref::MemRefDialect, hivm::HIVMDialect, annotation::AnnotationDialect>();
+                  memref::MemRefDialect, hivm::HIVMDialect, annotation::AnnotationDialect,
+                  LLVM::LLVMDialect>();
 }
 
 void TritonToStructuredPass::populateTritonToStructuredCanonicalizationPatterns(RewritePatternSet &patterns) {

@@ -33,8 +33,8 @@ is gated by `TRITON_DEBUG`.
 | Layer | What | Status |
 |---|---|---|
 | **L1** front-end | generate `NameLoc` for source vars into TTIR | **DONE & verified** (commit `313efecad`) |
-| **L2** conversion | preserve those locs through TTIR→adapterIR passes (absorption/fold/CSE/region-rebuild) | **gating phase** (see §4) |
-| **L3** end-to-end | wire debug-info into `bishengir-compile`, verify DWARF + single-step | not started |
+| **L2** conversion | preserve those locs through TTIR→adapterIR passes (absorption/fold/CSE/region-rebuild) | **PAUSED for naming** (backend can't surface names — §4c); not needed for line-only |
+| **L3** end-to-end | wire debug-info into `bishengir-compile`, verify DWARF + single-step | **line dim verified working** (§4d); naming blocked at backend |
 
 **L1 detail (done).** 4 files: `python/src/ir.h`, `python/src/ir.cc`,
 `python/triton/compiler/code_generator.py`, `python/triton/language/core.py`. Verified
@@ -92,23 +92,79 @@ The bet is (at least partly) **wrong as stated**:
 `FusedLoc` into a `!dbg` (unlike upstream MLIR, which recurses). The bottleneck is the
 CANN `bishengir`/`hivmc` binary, NOT our conversion layer / `absorbLoc`.**
 
-### 4c. Pending discriminators (decide the path forward)
-From an already-compiling flattened IR, change only the one `memref.copy` loc
-(`run_loc_variants.sh`):
+### 4c. Discriminators — RESOLVED (2026-06-18, Ascend910B4 / CANN 9.0.0)
+Ran `run_loc_variants.sh kernel.flat.mlir` (log: `variants_run.log`). From an
+already-compiling flattened IR, changed only the one `memref.copy` loc:
 
-| Variant | loc | Question |
-|---|---|---|
-| v1b | plain `FileLineColLoc(4242)` | does plain loc reach line table? (sanity) |
-| v2 | `FusedLoc` of all-`FileLineColLoc` members | does the **line** dim survive a fused? |
-| v3 | `NameLoc` as primary loc | does bishengir accept `NameLoc` **at all**? |
+| Variant | loc | COMPILE | LINE(4242) | NAME |
+|---|---|---|---|---|
+| v1b | plain `FileLineColLoc(4242)` | ✅ | **PASS** | n/a |
+| v2 | `FusedLoc` of all-`FileLineColLoc` members | ✅ | **FAIL** | FAIL |
+| v3 | `NameLoc` as primary loc | ✅ | **PASS** | FAIL |
 
-**Outcome map:**
-- v3 compiles + NAME PASS → variable naming feasible via NameLoc-as-primary; rebuild
-  the absorb strategy around that carrier.
-- v3 fails → NameLoc unsupported at backend. Options: **(A)** vendor fix to `hivmc` loc
-  translation, **(B)** lower NameLoc→DWARF ourselves before bishengir, **(C)** names
-  infeasible on this bishengir version.
-- v2 compiles + LINE PASS → line dimension can ride a FusedLoc even if names can't.
+**Findings:**
+- **FusedLoc not penetrated even for line** (v2 LINE FAIL) ⇒ the §4a absorbLoc /
+  FusedLoc-merge plan cannot deliver *any* dimension; **retire it as the carrier.**
+- **NameLoc-as-primary is safe + line-penetrated** (v3 LINE PASS): bishengir recurses
+  into the NameLoc for its inner FileLineColLoc. ⇒ **L1 NameLoc generation is safe to
+  keep on; it does not break the line table.**
+- **Name never reaches DWARF** (v3 NAME FAIL): zero `DW_TAG_variable`/`formal_parameter`
+  in `.debug_info`, even with `LLVM_EXTRACT_DI_LOCAL_VARIABLES=1`. The name string is
+  dropped by bishengir's loc→DWARF.
+
+**=> Variable naming is a BACKEND limitation, not a conversion-layer one.** Path forward
+for naming: **(A)** vendor fix to `hivmc`/bishengir loc→DWARF, **(B)** lower NameLoc→DWARF
+ourselves before bishengir, or **(C)** ship line-only now, names later. The **line**
+dimension is unblocked and can proceed independently.
+
+> **Decision (2026-06-18): take path (C) — ship line-only debugging first**; naming
+> deferred to a later backend path (A/B). §4d below is the first line-only milestone.
+
+### 4d. Line-only end-to-end — VERIFIED (2026-06-18, real triton compile flow)
+No backend change needed: `compiler.py:496-497` & `749-750` already add
+`--enable-debug-info=true` whenever `TRITON_DISABLE_LINE_INFO=0`. Compiled the real
+`probe_copy_kernel` through the *normal* triton flow (not the manual kit):
+
+```
+TRITON_KERNEL_DUMP=1 TRITON_ALWAYS_COMPILE=1 TRITON_DUMP_DIR=./e2e_dump \
+  TRITON_DISABLE_LINE_INFO=0 TRITON_DEBUG=1 python3 probe_kernel.py
+```
+
+Result on `probe_copy_kernel.npubin`:
+- Full DWARF present: `.debug_info / .debug_line / .debug_ranges / .debug_str / .debug_frame`.
+- `.debug_line` maps to **real source lines 27 / 29 / 31 / 32** of `probe_kernel.py`
+  (the kernel def, `offs`, `tl.load`, `tl.store`) — not all-`1`.
+- The ttadapter carries both real line locs *and* L1 NameLocs (`in_ptr/n/offs/val/...`);
+  the NameLocs do not break the line table (consistent with v3).
+
+**Gap (feeds line-breakability work):** lines **28** (`pid = program_id`) and **30**
+(`mask = offs < n`) were **absent** from the line table — exactly the orphan (program_id)
+and absorbed (mask) cases from §3.
+
+### 4e. Line-breakability — loc preservation IMPLEMENTED (2026-06-22)
+Master switch: **`LLVM_EXTRACT_DI_LOCAL_VARIABLES=1`** (the msdebug debug-info switch;
+off by default, zero impact on production builds). Replaces `TRITON_DEBUG` as the gate —
+that flag is too broad (device asserts, prints, …).
+
+- **mask absorbed line (30): DONE & VERIFIED.** The mask sub-expression's loc is now
+  threaded onto the generated bound arithmetic in `LoadStoreConverter.cpp` (the real
+  producer; twin gated changes in `MemOpConverter.cpp` / `MaskAnalysis.cpp`). With the
+  switch on, the probe kernel's `.debug_line` is `27 29 30 31 32`; off, `27 29 31 32`.
+  Carrier is plain/NameLoc-wrapped `FileLineColLoc`, which bishengir honors — no FusedLoc.
+- **program_id / num_programs orphan: DONE & VERIFIED.** With auto-blockify OFF these
+  lower to a bare kernel arg with no surviving op; a value-preserving anchor (`id+0`)
+  folds away. Fixed by injecting an **empty side-effecting `llvm.inline_asm` barrier**
+  carrying the orphan op's loc in `FunctionConverter.cpp` (gated): it can't be
+  folded/DCE'd, changes no value, survives bishengir, and produces a real `.debug_line`
+  row. Verified: `probe_compute` line 18 and `probe_kernel` line 28 now present; gate
+  off → original behavior; kernels still correct. (Auto-blockify ON already recomputes
+  program_id as `div/rem` carrying its loc, so it survives there independently.)
+- index/arange absorbed lines: see §coverage audit — dynamic indices already survive;
+  constant indices have no executable code (non-breakable, benign). No fix needed.
+
+See `LINE_BREAKABILITY_PLAN.md` for the full design + status and `LINE_DEBUGGING.md` for
+usage. Detail: the §3 roadmap's FusedLoc-merge is retired; line preservation uses the
+absorbed op's own single loc, which is all bishengir needs for the line table.
 
 ---
 
@@ -144,9 +200,12 @@ Order from the handoff (§4 there). Twin files = both `TritonToLinalg/*` and
   `absorbChainLocs`. **P1-3** program_id orphan NOP + collect #151 (gated).
 - **P1-4** reshape front-end (~8). **P2** individual cases + UnknownLoc replacements.
 
-> Note: if §4b/§4c shows NameLoc is unsupported by bishengir, this roadmap pauses on the
-> *naming* dimension until a backend path (A/B/C) is chosen — the line dimension may
-> still proceed.
+> **Status (2026-06-18): §4c resolved → this roadmap is PAUSED for the *naming*
+> dimension.** The absorbLoc/FusedLoc-merge carrier is dead at the backend (FusedLoc not
+> penetrated; NameLoc name dropped), so P0/P0-1/P0-2/P0-3 would not surface any name.
+> Resume only after a backend path (A vendor fix / B self-lower NameLoc→DWARF) lands.
+> The **line** dimension is unblocked and can proceed (NameLoc-as-primary keeps the line
+> table; line-only single-step is viable now).
 
 ---
 

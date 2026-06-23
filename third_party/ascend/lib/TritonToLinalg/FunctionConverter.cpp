@@ -22,6 +22,8 @@
 
 #include "ascend/include/TritonToLinalg/FunctionConverter.h"
 
+#include "ascend/include/Utils/DebugUtils.h"
+
 namespace FunctionConverter {
 using namespace mlir;
 using namespace triton;
@@ -36,6 +38,7 @@ LogicalResult GetProgramIDConverter::matchAndRewrite(
   auto numArgs = func.getNumArguments();
   auto id = func.getArgument(numArgs - GetProgramIDConverter::LAUNCH_GRID_RANK +
                              axis);
+  insertDebugNop(op.getLoc(), rewriter);
   rewriter.replaceOp(op, id);
   return success();
 }
@@ -50,6 +53,7 @@ LogicalResult GetNumProgramsConverter::matchAndRewrite(
   auto numArgs = func.getNumArguments();
   auto id = func.getArgument(
       numArgs - GetNumProgramsConverter::LAUNCH_GRID_RANK * 2 + axis);
+  insertDebugNop(op.getLoc(), rewriter);
   rewriter.replaceOp(op, id);
   return success();
 }

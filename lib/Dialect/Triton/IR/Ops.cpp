@@ -8,6 +8,7 @@
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/Triton/IR/Types.h"
 #include "triton/Dialect/Triton/IR/Utility.h"
+#include "triton/Tools/Sys/GetEnv.hpp"
 
 namespace mlir {
 namespace triton {
@@ -543,6 +544,10 @@ unsigned ScanOp::getNumOperands() { return this->getOperands().size(); }
 
 //-- SplatOp --
 OpFoldResult SplatOp::fold(FoldAdaptor adaptor) {
+  // msdebug: suppress constant-folding so the splat op (and its source line)
+  // survives for a debug NOP anchor. Opt-in; no effect on production builds.
+  if (::mlir::triton::tools::getBoolEnv("LLVM_EXTRACT_DI_LOCAL_VARIABLES"))
+    return {};
   auto value = adaptor.getSrc();
   if (!value)
     return {};
@@ -745,6 +750,10 @@ LogicalResult BroadcastOp::canonicalize(BroadcastOp op,
 }
 
 OpFoldResult BroadcastOp::fold(FoldAdaptor adaptor) {
+  // msdebug: suppress constant-folding so the broadcast op (and its source
+  // line) survives for a debug NOP anchor. Opt-in; no effect in production.
+  if (::mlir::triton::tools::getBoolEnv("LLVM_EXTRACT_DI_LOCAL_VARIABLES"))
+    return {};
   if (getType() == getSrc().getType()) {
     // no-op
     return getSrc();

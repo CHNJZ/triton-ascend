@@ -66,6 +66,20 @@ from triton.backends.compiler import (
 from triton.runtime import driver
 from triton.runtime.cache import get_dump_manager
 from triton.tools.get_ascend_devices import is_compile_on_910_95
+from triton.backends.ascend.debug_line_rewriter import rewrite_debug_line
+
+
+def _with_debug_line(npubin_stage, options):
+    """Wrap an npubin-producing stage so the emitted kernel binary gets
+    .debug_line cleanup for msdebug stepping. No-op unless
+    LLVM_EXTRACT_DI_LOCAL_VARIABLES is set; never raises (failure returns the
+    artifact unchanged), so it cannot break a build."""
+
+    def stage(src, metadata):
+        artifact = npubin_stage(src, metadata)
+        return rewrite_debug_line(artifact, metadata=metadata, options=options)
+
+    return stage
 
 
 # TODO: materialize the concrete min shape
@@ -1177,6 +1191,7 @@ class AscendBackend(BaseBackend):
                         src, metadata, options
                     )
                 )
+                stages["npubin"] = _with_debug_line(stages["npubin"], options)
                 return
             stages["ttadapter"] = lambda src, metadata: ttir_to_linalg(
                 src, metadata, options, named_ops=True
@@ -1193,6 +1208,7 @@ class AscendBackend(BaseBackend):
                         src, metadata, options
                     )
                 )
+            stages["npubin"] = _with_debug_line(stages["npubin"], options)
         else:
             raise NotImplementedError(
                 f"Backend '{self.target.backend}' is not supported. "

@@ -26,6 +26,8 @@
 #include "ascend/include/TritonToLinalg/TritonToLinalgPass.h"
 #include "TritonToLinalg/BlockPtrAnalysis.h"
 #include "ascend/include/TritonToLinalg/ArgMinMaxConverter.h"
+#include "ascend/include/TritonToLinalg/CanonicalizeDebugLocationsPass.h"
+#include "ascend/include/TritonToLinalg/DeduplicateDebugNopsPass.h"
 #include "ascend/include/TritonToLinalg/FunctionConverter.h"
 #include "ascend/include/TritonToLinalg/LoadStoreConverter.h"
 #include "ascend/include/TritonToLinalg/TritonOpConverter.h"
@@ -1222,6 +1224,26 @@ void TritonToLinalgPass::runOnOperation() {
     }
     return WalkResult::advance();
   });
+
+  // 10. (msdebug) Collapse inlined stdlib call-site locations to the user frame.
+  //     Opt-in via LLVM_EXTRACT_DI_LOCAL_VARIABLES=1; no-op otherwise.
+  {
+    mlir::PassManager pm(&getContext(), moduleOp.getOperationName());
+    pm.addPass(triton::createCanonicalizeDebugLocationsPass());
+    if (failed(runPipeline(pm, moduleOp))) {
+      moduleOp->emitWarning("CanonicalizeDebugLocationsPass pass failed");
+    }
+  }
+
+  // 11. (msdebug) Deduplicate the debug NOPs inserted by the converters.
+  //     Opt-in via LLVM_EXTRACT_DI_LOCAL_VARIABLES=1; non-fatal.
+  {
+    mlir::PassManager pm(&getContext(), moduleOp.getOperationName());
+    pm.addPass(triton::createDeduplicateDebugNopsPass());
+    if (failed(runPipeline(pm, moduleOp))) {
+      moduleOp->emitWarning("DeduplicateDebugNops pass failed");
+    }
+  }
 }
 
 std::unique_ptr<OperationPass<ModuleOp>>

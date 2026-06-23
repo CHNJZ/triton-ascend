@@ -38,26 +38,43 @@ locs reach the LLVM verifier with no `!dbg` and the build aborts *before* DWARF 
 emitted. The bottleneck is the CANN `bishengir`/`hivmc` binary, **not** the
 absorbLoc/listener work in the adapter.
 
-### Still pending (decides the strategy)
-Three discriminator runs (see "Variant tests" below) to learn *how far* the support
-goes. From an already-compiling `kernel.flat.mlir`, change only the one `memref.copy`
-loc:
+### DISCRIMINATOR RESULTS (2026-06-18, Ascend910B4 / CANN 9.0.0) — RESOLVED
+Ran `run_loc_variants.sh kernel.flat.mlir` (full log: `variants_run.log`). From an
+already-compiling `kernel.flat.mlir`, changed only the one `memref.copy` loc:
 
-| Variant | loc on the copy | Question |
-|---|---|---|
-| v1b control | plain `loc("probe.py":4242:7)` | does plain loc reach the line table? (method sanity) |
-| v2 | `loc(fused[<FileLineColLoc>, <FileLineColLoc>])` | does the **line** dimension survive a FusedLoc whose members are all FileLineColLocs? |
-| v3 | `loc("msdbg_probe_var"("probeN.py":4242:7))` | does bishengir accept a **NameLoc** as the primary loc at all? |
+| Variant | loc on the copy | COMPILE | LINE (4242) | NAME (msdbg_probe_var) |
+|---|---|---|---|---|
+| v1b control | plain `loc("probe.py":4242:7)` | ✅ | **PASS** | n/a |
+| v2 | `loc(fused[<FileLineColLoc>, <FileLineColLoc>])` | ✅ | **FAIL** | FAIL |
+| v3 | `loc("msdbg_probe_var"("probeN.py":4242:7))` | ✅ | **PASS** | FAIL |
 
-Outcome map:
-- **v3 compiles + NAME PASS** → variable naming is feasible via NameLoc-as-primary
-  (not as a fused member); rework the absorb strategy around that carrier.
-- **v3 fails to compile** → NameLoc is unsupported at the backend regardless of
-  carrier. Options: (A) vendor fix to `hivmc` loc translation, (B) lower
-  NameLoc→DWARF ourselves *before* handing IR to bishengir, (C) names infeasible on
-  this bishengir version.
-- **v2 compiles + LINE PASS** → the *line* dimension can ride a FusedLoc even if names
-  can't — line-table fusion (the `-O` multi-line story) stays on the table.
+Three hard conclusions:
+
+1. **FusedLoc is a dead carrier.** v2 — a FusedLoc whose members are *all*
+   FileLineColLocs — does **not** put line 4242 in the line table. bishengir does not
+   penetrate FusedLoc even for the *line* dimension. ⇒ the planned absorbLoc /
+   FusedLoc-merge strategy (retire #283, merge a lost op's loc into a survivor via
+   `FusedLoc{...}`) **cannot deliver even the line dimension** on this bishengir.
+2. **NameLoc-as-primary is safe and LINE-penetrated.** v3 compiles, and bishengir
+   *recurses into* the NameLoc to pull its inner FileLineColLoc(4242) into the line
+   table (LINE PASS). ⇒ keeping L1 NameLoc generation on does **not** break the line
+   table — the front-end loc work is safe to ship.
+3. **The name never reaches DWARF.** v3 NAME FAIL: `.debug_info` has **zero**
+   `DW_TAG_variable` / `DW_TAG_formal_parameter`, and `msdbg_probe_var` is absent —
+   even with `LLVM_EXTRACT_DI_LOCAL_VARIABLES=1` set. bishengir's loc→DWARF in this
+   CANN version simply does not lower a NameLoc's name string into a local-variable DIE.
+
+**Verdict: variable naming is a BACKEND problem, not a conversion-layer one.** No amount
+of absorbLoc/listener work in the adapter can surface names, because (a) the FusedLoc
+carrier dies before DWARF and (b) even a surviving NameLoc's name is dropped by
+bishengir. The naming dimension now reduces to README options:
+- **(A)** vendor fix to `hivmc`/bishengir loc→DWARF (emit DW_TAG_variable from NameLoc).
+- **(B)** lower NameLoc → DWARF (or a DI-bearing form bishengir *does* read) ourselves,
+  *before* handing IR to bishengir.
+- **(C)** names infeasible on this bishengir version — ship line-only debugging now.
+
+The **line** dimension is unaffected and works (plain FileLineColLoc, incl. the one
+inside a NameLoc). Line-only single-step debugging can proceed independently.
 
 ### Corrections to the handoff doc (confirmed on hardware)
 - debug flag is `--enable-debug-info=true` (not `-g` / `--mlir-print-debuginfo`).

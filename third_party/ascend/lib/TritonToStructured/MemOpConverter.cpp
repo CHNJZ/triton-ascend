@@ -44,10 +44,14 @@
 #include "mlir/IR/Matchers.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/Value.h"
+#include "mlir/Interfaces/LoopLikeInterface.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/Triton/IR/Types.h"
+#include "triton/Tools/Sys/GetEnv.hpp"
+#include "Utils/DebugUtils.h"
 
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/SmallVectorExtras.h"
 #include "llvm/ADT/TypeSwitch.h"
@@ -75,12 +79,53 @@ using namespace mlir;
 using namespace triton;
 using namespace TritonToStructured;
 
+// msdebug: walk the backward slice of a pointer/offset value and anchor a debug NOP at
+// the source line of every index/offset computation op (make_range / arith / broadcast /
+// addptr …). These ops are otherwise absorbed by PtrAnalysis with no surviving op, so
+// lines like `offs_k = tl.arange(...)`, 2D block-offset sub-expressions, or matmul's
+// preheader index math would never reach the DWARF line table. Loop-carried pointers
+// (an scf.for iter_arg whose init addptr lives in the preheader) are traced back to the
+// init operand. Gated inside insertDebugNop; bounded by depth + a visited set.
+static void anchorOffsetLines(Value v, PatternRewriter &rewriter, unsigned depth,
+                              llvm::DenseSet<Operation *> &seen) {
+  if (depth > 24)
+    return;
+  // Loop-carried value: trace the scf.for iter_arg back to its init operand so the
+  // index computation in the loop preheader (matmul offs_am/offs_k) is reachable.
+  if (auto barg = dyn_cast<BlockArgument>(v)) {
+    auto *parent = barg.getOwner()->getParentOp();
+    if (auto loop = dyn_cast_or_null<LoopLikeOpInterface>(parent))
+      if (OpOperand *init = loop.getTiedLoopInit(barg))
+        anchorOffsetLines(init->get(), rewriter, depth + 1, seen);
+    return;
+  }
+  Operation *def = v.getDefiningOp();
+  if (!def || !seen.insert(def).second)
+    return;
+  if (isa<triton::MakeRangeOp, triton::SplatOp, triton::BroadcastOp,
+          triton::ExpandDimsOp, triton::AddPtrOp, arith::AddIOp, arith::SubIOp,
+          arith::MulIOp, arith::RemSIOp, arith::DivSIOp, arith::RemUIOp,
+          arith::DivUIOp, arith::CmpIOp, arith::AndIOp, arith::OrIOp>(def))
+    insertDebugNop(def->getLoc(), rewriter);
+  for (Value operand : def->getOperands())
+    anchorOffsetLines(operand, rewriter, depth + 1, seen);
+}
+
 LogicalResult
 LoadConverter::matchAndRewrite(triton::LoadOp op,
                                PatternRewriter &rewriter) const {
     auto loc = op.getLoc();
     auto oldPtr = op.getPtr();
+    // msdebug: anchor debug NOPs at every index/offset sub-expression's source line in
+    // the pointer's backward slice (incl. loop-carried offsets), otherwise absorbed by
+    // PtrAnalysis with no surviving op.
     auto oldMask = op.getMask();
+    {
+      llvm::DenseSet<Operation *> seen;
+      anchorOffsetLines(oldPtr, rewriter, 0, seen);
+      if (oldMask)
+        anchorOffsetLines(oldMask, rewriter, 0, seen);
+    }
     auto oldOther = op.getOther();
 
     MemOpTransformer tf(
@@ -135,7 +180,15 @@ StoreConverter::matchAndRewrite(triton::StoreOp op,
                                 PatternRewriter &rewriter) const {
     auto loc = op.getLoc();
     auto oldPtr = op.getPtr();
+    // msdebug: anchor debug NOPs at every index/offset sub-expression's source line in
+    // the pointer's backward slice (incl. loop-carried offsets).
     auto oldMask = op.getMask();
+    {
+      llvm::DenseSet<Operation *> seen;
+      anchorOffsetLines(oldPtr, rewriter, 0, seen);
+      if (oldMask)
+        anchorOffsetLines(oldMask, rewriter, 0, seen);
+    }
     auto oldValue = op.getValue();
 
     MemOpTransformer tf(
@@ -384,8 +437,19 @@ Value MemOpTransformer::createNewPtr(Value oldPtr,
 }
 
 Value MemOpTransformer::createNewMask(Value oldMask,
-                                      const Location loc, PatternRewriter &rewriter) {
+                                      const Location locIn, PatternRewriter &rewriter) {
     if (!oldMask)  return nullptr;
+
+    // Line-level debugging (LLVM_EXTRACT_DI_LOCAL_VARIABLES): the mask expression (e.g. `offs < n`) is
+    // absorbed into the access bounds, which otherwise inherit the memory op's source
+    // line — so a breakpoint can never land on the mask line. Tag the generated bound
+    // arithmetic with the mask value's own location instead, so its line survives into
+    // the DWARF line table (bishengir penetrates the NameLoc wrapper to the inner
+    // FileLineColLoc; verified by the v3 gating). Off by default; no effect on normal
+    // builds.
+    Location loc = locIn;
+    if (::mlir::triton::tools::getBoolEnv("LLVM_EXTRACT_DI_LOCAL_VARIABLES"))
+        loc = oldMask.getLoc();
 
     LLVM_DEBUG({
         llvm::dbgs() << "----------------------------------------------\n";

@@ -884,6 +884,7 @@ def get_install_requirements():
         "pyyaml",
         "pybind11",
         "pandas",
+        "pyelftools",  # msdebug .debug_line rewrite (LLVM_EXTRACT_DI_LOCAL_VARIABLES)
     ]
     arch = get_architecture()
     return [*install_requires, *ARCHITECTURE_DEPENDENCIES[arch]]
