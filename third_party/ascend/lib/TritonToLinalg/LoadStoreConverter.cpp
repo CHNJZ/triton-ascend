@@ -344,16 +344,16 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
   // boundary check
   auto boundaryCheck = op.getBoundaryCheck();
   if (!boundaryCheck.empty()) {
-    auto makeTensorPtrOp = op.getPtr().getDefiningOp<triton::MakeTensorPtrOp>();
-    auto boundarySizes = mlir::ConverterUtils::getBoundarySizes(
-        boundaryCheck, /*remapped*/ ptr, loc, rewriter);
+    std::optional<mlir::ConverterUtils::TensorPtrAxisInfo> tensorPtrInfo;
+    auto boundarySizes = mlir::ConverterUtils::getBoundarySizesFromTensorPtrInfoOrFallback(
+        op.getPtr(), ptr, boundaryCheck, loc, rewriter, tensorPtrInfo);
     // handle the padding
     auto padding = op.getPadding();
     SmallVector<OpFoldResult> srcOffsets(boundarySizes.size(), rewriter.getIndexAttr(0));
     SmallVector<OpFoldResult> dstOffsets;
-    if (makeTensorPtrOp) {
+    if (tensorPtrInfo) {
       auto zeroVal = rewriter.createOrFold<arith::ConstantOp>(loc, rewriter.getI32IntegerAttr(0));
-      for (auto [idx, offVal] : llvm::enumerate(makeTensorPtrOp.getOffsets())) {
+      for (auto [idx, offVal] : llvm::enumerate(tensorPtrInfo->offsets)) {
         if (llvm::find(boundaryCheck, idx) == boundaryCheck.end()) {
           dstOffsets.push_back(srcOffsets[idx]);
           continue;
@@ -1043,14 +1043,14 @@ StoreConverter::matchAndRewrite(triton::StoreOp op, OpAdaptor adaptor,
   // 1. boundary size check
   auto boundaryCheck = op.getBoundaryCheck();
   if (!boundaryCheck.empty()) {
-    auto makeTensorPtrOp = op.getPtr().getDefiningOp<triton::MakeTensorPtrOp>();
-    auto boundarySizes = mlir::ConverterUtils::getBoundarySizes(
-        boundaryCheck, /*remapped*/ ptr, loc, rewriter);
+    std::optional<mlir::ConverterUtils::TensorPtrAxisInfo> tensorPtrInfo;
+    auto boundarySizes = mlir::ConverterUtils::getBoundarySizesFromTensorPtrInfoOrFallback(
+        op.getPtr(), ptr, boundaryCheck, loc, rewriter, tensorPtrInfo);
     SmallVector<OpFoldResult> srcOffsets;
     SmallVector<OpFoldResult> dstOffsets(boundarySizes.size(), rewriter.getIndexAttr(0));
-    if (makeTensorPtrOp) {
+    if (tensorPtrInfo) {
       auto zeroVal = rewriter.createOrFold<arith::ConstantOp>(loc, rewriter.getI32IntegerAttr(0));
-      for (auto [idx, offVal] : llvm::enumerate(makeTensorPtrOp.getOffsets())) {
+      for (auto [idx, offVal] : llvm::enumerate(tensorPtrInfo->offsets)) {
         if (llvm::find(boundaryCheck, idx) == boundaryCheck.end()) {
           srcOffsets.push_back(dstOffsets[idx]);
           continue;
@@ -1072,13 +1072,57 @@ StoreConverter::matchAndRewrite(triton::StoreOp op, OpAdaptor adaptor,
     } else {
       srcOffsets = dstOffsets;
     }
-    auto srcSlice = mlir::ConverterUtils::makeExtractSliceOp(
-        val, srcOffsets, boundarySizes, loc, rewriter);
     auto dstSubview = mlir::ConverterUtils::makeSubViewOp(
         ptr, dstOffsets, boundarySizes, loc, rewriter);
-    auto storeOp = rewriter.create<bufferization::MaterializeInDestinationOp>(
-        loc, srcSlice, dstSubview);
-    storeOp.setWritable(true);
+
+    bool isCheckedAxisPrefix = !boundaryCheck.empty();
+    for (auto [expectedAxis, checkedAxis] : llvm::enumerate(boundaryCheck)) {
+      if (checkedAxis != static_cast<int32_t>(expectedAxis)) {
+        isCheckedAxisPrefix = false;
+        break;
+      }
+    }
+
+    auto hasSingleLeadingDynamicDim = [](MemRefType subviewType) {
+      if (subviewType.getRank() <= 1)
+        return false;
+      auto shape = subviewType.getShape();
+      if (!ShapedType::isDynamic(shape[0]))
+        return false;
+      for (int64_t i = 1, e = subviewType.getRank(); i < e; ++i) {
+        if (ShapedType::isDynamic(shape[i]))
+          return false;
+      }
+      return true;
+    };
+
+    bool isLoopCarriedTensorPtr =
+        isa<BlockArgument>(op.getPtr()) &&
+        isa<scf::ForOp>(op.getPtr().getParentBlock()->getParentOp());
+    bool insideScfFor = static_cast<bool>(op->getParentOfType<scf::ForOp>());
+    auto dstSubviewType = cast<MemRefType>(dstSubview.getType());
+
+    // Prefix boundary_check stores on rank>1 tiles lower to memref.copy when
+    // outside scf.for, or when the effective tile is ?xSxS... . Loop-carried
+    // tensor pointers always stay on the materialize path.
+    if (!isLoopCarriedTensorPtr &&
+        (hasSingleLeadingDynamicDim(dstSubviewType) ||
+         (isCheckedAxisPrefix && dstOffsets.size() > 1u && !insideScfFor))) {
+      auto tensorValueType = cast<RankedTensorType>(val.getType());
+      auto valueMemRefType = MemRefType::get(tensorValueType.getShape(),
+                                             tensorValueType.getElementType());
+      Value valueMemRef =
+          rewriter.create<bufferization::ToMemrefOp>(loc, valueMemRefType, val);
+      auto srcSubview = mlir::ConverterUtils::makeSubViewOp(
+          valueMemRef, srcOffsets, boundarySizes, loc, rewriter);
+      rewriter.create<memref::CopyOp>(loc, srcSubview, dstSubview);
+    } else {
+      auto srcSlice = mlir::ConverterUtils::makeExtractSliceOp(
+          val, srcOffsets, boundarySizes, loc, rewriter);
+      auto storeOp = rewriter.create<bufferization::MaterializeInDestinationOp>(
+          loc, srcSlice, dstSubview);
+      storeOp.setWritable(true);
+    }
     rewriter.eraseOp(op);
     return success();
   }
