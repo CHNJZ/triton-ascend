@@ -126,69 +126,70 @@ CONSTRAINTS = {
     },
     "triton.language.atomic_add": {
         "constraints": [
-            "DataType: Ascend does not support fp64, int64 (hardware limitation).",
-            "``sem``: 只支持acq_rel",
-            "``scope``: 只支持gpu",
+            "DataType: Ascend does not support fp64 (hardware limitation).",
+            "``sem``: Ascend does not support \"acquire\",\"release\",\"relaxed\"",
+            "``scope``: Ascend does not support \"cta\",\"sys\"",
         ],
         "example":
         "triton.language.atomic_add",
     },
     "triton.language.atomic_and": {
         "constraints": [
-            "``sem``: 只支持acq_rel",
-            "``scope``: 只支持gpu",
+            "``sem``: Ascend does not support \"acquire\",\"release\",\"relaxed\"",
+            "``scope``: Ascend does not support \"cta\",\"sys\"",
         ],
-        "example": "triton.language.atomic_and",
+        "example":
+        "triton.language.atomic_and",
     },
     "triton.language.atomic_cas": {
         "constraints": [
-            "DataType: Ascend does not support bf16, fp64 (hardware limitation).",
-            "``sem``: 只支持acq_rel",
-            "``scope``: 只支持gpu",
+            "DataType: Ascend does not support fp64 (hardware limitation).",
+            "``sem``: Ascend does not support \"acquire\",\"release\",\"relaxed\"",
+            "``scope``: Ascend does not support \"cta\",\"sys\"",
         ],
         "example":
         "triton.language.atomic_cas",
     },
     "triton.language.atomic_max": {
         "constraints": [
-            "DataType: Ascend does not support int64 (hardware limitation).",
-            "``sem``: 只支持acq_rel",
-            "``scope``: 只支持gpu",
+            "``sem``: Ascend does not support \"acquire\",\"release\",\"relaxed\"",
+            "``scope``: Ascend does not support \"cta\",\"sys\"",
         ],
         "example":
         "triton.language.atomic_max",
     },
     "triton.language.atomic_min": {
         "constraints": [
-            "DataType: Ascend does not support int64 (hardware limitation).",
-            "``sem``: 只支持acq_rel",
-            "``scope``: 只支持gpu",
+            "``sem``: Ascend does not support \"acquire\",\"release\",\"relaxed\"",
+            "``scope``: Ascend does not support \"cta\",\"sys\"",
         ],
         "example":
         "triton.language.atomic_min",
     },
     "triton.language.atomic_or": {
         "constraints": [
-            "``sem``: 只支持acq_rel",
-            "``scope``: 只支持gpu",
+            "``sem``: Ascend does not support \"acquire\",\"release\",\"relaxed\"",
+            "``scope``: Ascend does not support \"cta\",\"sys\"",
         ],
-        "example": "triton.language.atomic_or",
+        "example":
+        "triton.language.atomic_or",
     },
     "triton.language.atomic_xchg": {
         "constraints": [
             "DataType: Ascend does not support fp64 (hardware limitation).",
-            "``sem``: 只支持acq_rel",
-            "``scope``: 只支持gpu",
+            "``sem``: Ascend does not support \"acquire\",\"release\",\"relaxed\"",
+            "``scope``: Ascend does not support \"cta\",\"sys\"",
         ],
         "example":
         "triton.language.atomic_xchg",
     },
     "triton.language.atomic_xor": {
         "constraints": [
-            "``sem``: 只支持acq_rel",
-            "``scope``: 只支持gpu",
+            "``sem``: Ascend does not support \"acquire\",\"release\",\"relaxed\"",
+            "``scope``: Ascend does not support \"cta\",\"sys\"",
         ],
-        "example": "triton.language.atomic_xor",
+        "example":
+        "triton.language.atomic_xor",
     },
     "triton.language.broadcast": {
         "constraints": [
@@ -395,6 +396,30 @@ CONSTRAINTS = {
         ],
         "example": "triton.language.extra.cann.extension.debug_barrier",
     },
+    "triton.language.extra.cann.extension.extract_slice": {
+        "constraints": [
+            "DataType: Ascend does not support bool (hardware limitation).",
+        ],
+        "example": "triton.language.extra.cann.extension.extract_slice",
+    },
+    "triton.language.extra.cann.extension.get_element": {
+        "constraints": [
+            "DataType: Ascend does not support bool (hardware limitation).",
+        ],
+        "example": "triton.language.extra.cann.extension.get_element",
+    },
+    "triton.language.extra.cann.extension.insert_slice": {
+        "constraints": [
+            "DataType: Ascend does not support bool (hardware limitation).",
+        ],
+        "example": "triton.language.extra.cann.extension.insert_slice",
+    },
+    "triton.language.extra.cann.extension.multibuffer": {
+        "constraints": [
+            "only support bufferize equals 2.",
+        ],
+        "example": "triton.language.extra.cann.extension.multibuffer",
+    },
     "triton.language.extra.cann.extension.parallel": {
         "constraints": [
             "DataType: Ascend A2/A3 does not support uint16/uint32/uint64/fp64, \
@@ -459,12 +484,6 @@ CONSTRAINTS = {
         "example":
         "triton.language.extra.cann.extension.sync_block_wait",
     },
-    "triton.language.extract_slice": {
-        "constraints": [
-            "DataType: Ascend does not support bool (hardware limitation).",
-        ],
-        "example": "triton.language.extract_slice",
-    },
     "triton.language.flip": {
         "constraints": [
             "DataType: Ascend does not support fp64, uint16, uint32, uint64, uint8 (hardware limitation).",
@@ -501,12 +520,6 @@ CONSTRAINTS = {
         ],
         "example": "triton.language.gather",
     },
-    "triton.language.get_element": {
-        "constraints": [
-            "DataType: Ascend does not support bool (hardware limitation).",
-        ],
-        "example": "triton.language.get_element",
-    },
     "triton.language.greater_than": {
         "constraints": [
             "DataType: Ascend does not support fp64, uint16, uint32, uint64 (hardware limitation).",
@@ -520,8 +533,8 @@ CONSTRAINTS = {
     },
     "triton.language.histogram": {
         "constraints": [
-            "当前triton3.2版本暂未支持mask参数",
-            "input输入范围限制在 [0, num_bins-1]",
+            "triton3.2 does not support mask",
+            "input range is limited to [0, num_bins-1]",
         ],
         "example": "triton.language.histogram",
     },
@@ -533,12 +546,6 @@ CONSTRAINTS = {
         ],
         "example":
         "triton.language.inline_asm_elementwise",
-    },
-    "triton.language.insert_slice": {
-        "constraints": [
-            "DataType: Ascend does not support bool (hardware limitation).",
-        ],
-        "example": "triton.language.insert_slice",
     },
     "triton.language.interleave": {
         "constraints": [
@@ -696,31 +703,15 @@ CONSTRAINTS = {
         "example": "triton.language.neg",
     },
     "triton.language.rand": {
-        "constraints": [
-            "seed 参数不支持 fp16/fp32/fp64/bf16 类型，仅支持整数和 bool 类型",
-            "相对社区能力暂不支持（具体差异待补充）",
-        ],
         "example": "triton.language.rand",
     },
     "triton.language.randint": {
-        "constraints": [
-            "seed 参数不支持 fp16/fp32/fp64/bf16 类型，仅支持整数和 bool 类型",
-            "相对社区能力暂不支持（具体差异待补充）",
-        ],
         "example": "triton.language.randint",
     },
     "triton.language.randint4x": {
-        "constraints": [
-            "seed 参数不支持 fp16/fp32/fp64/bf16 类型，仅支持整数和 bool 类型",
-            "相对社区能力暂不支持（具体差异待补充）",
-        ],
         "example": "triton.language.randint4x",
     },
     "triton.language.randn": {
-        "constraints": [
-            "seed 参数不支持 fp16/fp32/fp64/bf16 类型，仅支持整数和 bool 类型",
-            "相对社区能力暂不支持（具体差异待补充）",
-        ],
         "example": "triton.language.randn",
     },
     "triton.language.range": {
@@ -788,6 +779,12 @@ CONSTRAINTS = {
         ],
         "example":
         "triton.language.sort",
+    },
+    "triton.language.topk": {
+        "constraints": [
+            "DataType: Ascend does not support bool, fp64, int32, int64, uint8 (hardware limitation).",
+        ],
+        "example": "triton.language.topk",
     },
     "triton.language.extra.cann.extension.sort": {
         "constraints": [
@@ -988,5 +985,119 @@ CONSTRAINTS = {
         ],
         "example":
         "triton.language.extra.cann.extension.scatter_ub_to_out",
+    },
+    "triton.language.extra.cann.libdevice.acos": {
+        "example": "triton.language.extra.cann.libdevice.acos",
+    },
+    "triton.language.extra.cann.libdevice.acosh": {
+        "example": "triton.language.extra.cann.libdevice.acosh",
+    },
+    "triton.language.extra.cann.libdevice.asin": {
+        "example": "triton.language.extra.cann.libdevice.asin",
+    },
+    "triton.language.extra.cann.libdevice.asinh": {
+        "example": "triton.language.extra.cann.libdevice.asinh",
+    },
+    "triton.language.extra.cann.libdevice.atan": {
+        "example": "triton.language.extra.cann.libdevice.atan",
+    },
+    "triton.language.extra.cann.libdevice.atan2": {
+        "example": "triton.language.extra.cann.libdevice.atan2",
+    },
+    "triton.language.extra.cann.libdevice.atanh": {
+        "example": "triton.language.extra.cann.libdevice.atanh",
+    },
+    "triton.language.extra.cann.libdevice.copysign": {
+        "example": "triton.language.extra.cann.libdevice.copysign",
+    },
+    "triton.language.extra.cann.libdevice.cosh": {
+        "example": "triton.language.extra.cann.libdevice.cosh",
+    },
+    "triton.language.extra.cann.libdevice.cyl_bessel_i0": {
+        "example": "triton.language.extra.cann.libdevice.cyl_bessel_i0",
+    },
+    "triton.language.extra.cann.libdevice.div_rz": {
+        "example": "triton.language.extra.cann.libdevice.div_rz",
+    },
+    "triton.language.extra.cann.libdevice.erfinv": {
+        "example": "triton.language.extra.cann.libdevice.erfinv",
+    },
+    "triton.language.extra.cann.libdevice.expm1": {
+        "example": "triton.language.extra.cann.libdevice.expm1",
+    },
+    "triton.language.extra.cann.libdevice.fast_dividef": {
+        "example": "triton.language.extra.cann.libdevice.fast_dividef",
+    },
+    "triton.language.extra.cann.libdevice.fast_expf": {
+        "example": "triton.language.extra.cann.libdevice.fast_expf",
+    },
+    "triton.language.extra.cann.libdevice.float_as_int": {
+        "example": "triton.language.extra.cann.libdevice.float_as_int",
+    },
+    "triton.language.extra.cann.libdevice.fmod": {
+        "example": "triton.language.extra.cann.libdevice.fmod",
+    },
+    "triton.language.extra.cann.libdevice.gamma": {
+        "example": "triton.language.extra.cann.libdevice.gamma",
+    },
+    "triton.language.extra.cann.libdevice.hypot": {
+        "example": "triton.language.extra.cann.libdevice.hypot",
+    },
+    "triton.language.extra.cann.libdevice.ilogb": {
+        "example": "triton.language.extra.cann.libdevice.ilogb",
+    },
+    "triton.language.extra.cann.libdevice.isinf": {
+        "example": "triton.language.extra.cann.libdevice.isinf",
+    },
+    "triton.language.extra.cann.libdevice.isnan": {
+        "example": "triton.language.extra.cann.libdevice.isnan",
+    },
+    "triton.language.extra.cann.libdevice.ldexp": {
+        "example": "triton.language.extra.cann.libdevice.ldexp",
+    },
+    "triton.language.extra.cann.libdevice.lgamma": {
+        "example": "triton.language.extra.cann.libdevice.lgamma",
+    },
+    "triton.language.extra.cann.libdevice.log10": {
+        "example": "triton.language.extra.cann.libdevice.log10",
+    },
+    "triton.language.extra.cann.libdevice.log1p": {
+        "example": "triton.language.extra.cann.libdevice.log1p",
+    },
+    "triton.language.extra.cann.libdevice.nearbyint": {
+        "example": "triton.language.extra.cann.libdevice.nearbyint",
+    },
+    "triton.language.extra.cann.libdevice.nextafter": {
+        "example": "triton.language.extra.cann.libdevice.nextafter",
+    },
+    "triton.language.extra.cann.libdevice.pow": {
+        "example": "triton.language.extra.cann.libdevice.pow",
+    },
+    "triton.language.extra.cann.libdevice.reciprocal": {
+        "example": "triton.language.extra.cann.libdevice.reciprocal",
+    },
+    "triton.language.extra.cann.libdevice.relu": {
+        "example": "triton.language.extra.cann.libdevice.relu",
+    },
+    "triton.language.extra.cann.libdevice.rint": {
+        "example": "triton.language.extra.cann.libdevice.rint",
+    },
+    "triton.language.extra.cann.libdevice.round": {
+        "example": "triton.language.extra.cann.libdevice.round",
+    },
+    "triton.language.extra.cann.libdevice.signbit": {
+        "example": "triton.language.extra.cann.libdevice.signbit",
+    },
+    "triton.language.extra.cann.libdevice.sinh": {
+        "example": "triton.language.extra.cann.libdevice.sinh",
+    },
+    "triton.language.extra.cann.libdevice.tan": {
+        "example": "triton.language.extra.cann.libdevice.tan",
+    },
+    "triton.language.extra.cann.libdevice.tanh": {
+        "example": "triton.language.extra.cann.libdevice.tanh",
+    },
+    "triton.language.extra.cann.libdevice.trunc": {
+        "example": "triton.language.extra.cann.libdevice.trunc",
     },
 }

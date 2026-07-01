@@ -1107,12 +1107,11 @@ class tensor(base_value):
         assert False, "Transposition must be created by the AST Visitor"
 
     @builtin
-    def to(self, dtype: dtype, fp_downcast_rounding: Optional[str] = None, bitcast: bool = False,
-           overflow_mode: Optional[str] = None, _semantic=None):
+    def to(self, dtype: dtype, fp_downcast_rounding: Optional[str] = None, bitcast: bool = False, _semantic=None):
         """
         Alias for :py:func:`tensor.cast`.
         """
-        return cast(self, dtype, fp_downcast_rounding, bitcast, overflow_mode, _semantic=_semantic)
+        return cast(self, dtype, fp_downcast_rounding, bitcast, _semantic=_semantic)
 
     # Type stubs for functions added by the _tensor_member_fn decorator.
     # (Unfortunately these can't be created automatically.)
@@ -1140,7 +1139,7 @@ class tensor(base_value):
     def expand_dims(self, axis) -> tensor:
         ...
 
-    def cast(self, dtype, fp_downcast_rounding=None, bitcast=False, overflow_mode=None) -> tensor:
+    def cast(self, dtype, fp_downcast_rounding=None, bitcast=False) -> tensor:
         ...
 
     def store(self, value, mask=None, boundary_check=(), cache_modifier="", eviction_policy="") -> tensor:
@@ -1954,8 +1953,7 @@ def expand_dims(input, axis, _semantic=None):
 
 @_tensor_member_fn
 @builtin
-def cast(input, dtype: dtype, fp_downcast_rounding: Optional[str] = None, bitcast: bool = False,
-         overflow_mode: Optional[str] = None, _semantic=None):
+def cast(input, dtype: dtype, fp_downcast_rounding: Optional[str] = None, bitcast: bool = False, _semantic=None):
     """
     Casts a tensor to the given :code:`dtype`.
 
@@ -2633,9 +2631,9 @@ def reduce(input, axis, combine_fn, keep_dims=False, _semantic=None, _generator=
     ret = _semantic.reduction(input, axis, make_combine_region)
     if keep_dims:
         if axis is not None:
-            ret = builtins.tuple(expand_dims(t, axis, _semantic=_semantic) for t in ret)
+            ret = tuple(expand_dims(t, axis, _semantic=_semantic) for t in ret)
         else:
-            ret = builtins.tuple(expand_ndims(t, len(input[0].shape)) for t in ret)
+            ret = tuple(expand_ndims(t, len(input[0].shape)) for t in ret)
     return ret
 
 
