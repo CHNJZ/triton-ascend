@@ -24,6 +24,7 @@
 #include "ascend/include/Utils/Utils.h"
 
 #include "triton/Dialect/Triton/IR/Dialect.h"
+#include "triton/Tools/Sys/GetEnv.hpp"
 
 #include "mlir/Dialect/Utils/StaticValueUtils.h"
 #include "mlir/IR/BuiltinAttributes.h"
@@ -57,7 +58,16 @@ std::optional<MaskState> runMaskAnalysisImpl(MemAccOpTy op, OpBuilder &builder)
   builder.setInsertionPoint(op);
 
   MaskState mstate;
-  if (mstate.parse(mask, op.getLoc(), builder).failed()) {
+  // Line-level debugging (LLVM_EXTRACT_DI_LOCAL_VARIABLES): the mask sub-expression (e.g. `offs < n`)
+  // is otherwise absorbed into access bounds and inherits the memory op's source
+  // line, so a breakpoint can never land on the mask line. Tag the generated bound
+  // arithmetic with the mask value's own location instead, so its source line
+  // survives into the DWARF line table. bishengir penetrates the NameLoc wrapper to
+  // the inner FileLineColLoc (verified by the v3 gating). Off by default.
+  Location parseLoc = op.getLoc();
+  if (::mlir::triton::tools::getBoolEnv("LLVM_EXTRACT_DI_LOCAL_VARIABLES"))
+    parseLoc = mask.getLoc();
+  if (mstate.parse(mask, parseLoc, builder).failed()) {
     return std::nullopt;
   }
   return mstate;

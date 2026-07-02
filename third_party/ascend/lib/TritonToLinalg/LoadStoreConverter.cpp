@@ -50,6 +50,8 @@
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/Value.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
+#include "triton/Tools/Sys/GetEnv.hpp"
+#include "ascend/include/Utils/DebugUtils.h"
 #include "Utils/Utils.h"
 
 #include "llvm/ADT/DenseMap.h"
@@ -78,6 +80,7 @@ const std::string MayImplicitTransposeWithLastAxisTAG = "MayImplicitTransposeWit
 LogicalResult
 AddPtrConverter::matchAndRewrite(triton::AddPtrOp op, OpAdaptor adaptor,
                                  ConversionPatternRewriter &rewriter) const {
+  insertDebugNop(op.getLoc(), rewriter);
   llvm::SmallDenseMap<Value, BlockData> known;
   BlockDataParser::rewriteAddPtr(op, adaptor, rewriter, known);
   return success();
@@ -434,7 +437,16 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
   }
 
   MaskState mstate;
-  auto isContMask = mstate.parse(mask, loc, rewriter);
+  // Line-level debugging (LLVM_EXTRACT_DI_LOCAL_VARIABLES): the mask expression (e.g. `offs < n`) is
+  // absorbed into the access-bound arithmetic, which otherwise inherits the load's
+  // source line — so a breakpoint can never land on the mask line. Parse the mask with
+  // its own source location so the generated bound arithmetic carries the mask line
+  // into the DWARF line table (the actual access keeps the load line via getSubview,
+  // which still uses `loc`). bishengir penetrates the NameLoc wrapper. Off by default.
+  Location maskLoc = loc;
+  if (mask && ::mlir::triton::tools::getBoolEnv("LLVM_EXTRACT_DI_LOCAL_VARIABLES"))
+    maskLoc = mask.getLoc();
+  auto isContMask = mstate.parse(mask, maskLoc, rewriter);
   if (isContMask.failed()) {
     return rewriter.notifyMatchFailure(
         op, "can not lower uncontinuout masked loads");
@@ -602,7 +614,12 @@ AtomicRMWConverter::matchAndRewrite(triton::AtomicRMWOp op, OpAdaptor adaptor,
       return success();
     }
     MaskState mstate;
-    isDiscreteMask = mstate.parse(mask, loc, rewriter).failed();
+    // Line-level debugging (LLVM_EXTRACT_DI_LOCAL_VARIABLES): see LoadConverter above — tag the mask's
+    // bound arithmetic with the mask's own source line so it survives to DWARF.
+    Location maskLoc = loc;
+    if (::mlir::triton::tools::getBoolEnv("LLVM_EXTRACT_DI_LOCAL_VARIABLES"))
+      maskLoc = mask.getLoc();
+    isDiscreteMask = mstate.parse(mask, maskLoc, rewriter).failed();
     if (!constantMask && !isDiscreteMask) {
       // For dstMemref (store output), use subview to maintain reference to
       // original memref. For inputVal (store input), use tensor.extract_slice

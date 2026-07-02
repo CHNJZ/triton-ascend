@@ -23,6 +23,8 @@ public:
 
   OpBuilder &getBuilder() { return *builder; }
 
+  mlir::MLIRContext *getContext() { return getBuilder().getContext(); }
+
   bool isLineInfoEnabled() { return lineInfoEnabled; }
 
   bool isSimtMode() const { return compile_mode == "simt"; }

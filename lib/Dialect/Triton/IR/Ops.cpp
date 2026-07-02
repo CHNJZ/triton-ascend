@@ -8,6 +8,7 @@
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/Triton/IR/Types.h"
 #include "triton/Dialect/Triton/IR/Utility.h"
+#include "triton/Tools/Sys/GetEnv.hpp"
 
 namespace mlir {
 namespace triton {
@@ -548,6 +549,27 @@ OpFoldResult SplatOp::fold(FoldAdaptor adaptor) {
     return {};
   if (!isa<FloatAttr, IntegerAttr>(value))
     return {};
+  // msdebug: suppress constant-folding so the splat op (and its source line)
+  // survives for a debug NOP anchor. Opt-in; no effect on production builds.
+  //
+  // Exception: a splat that feeds a tt.dot accumulator (the C operand) must
+  // still fold to a dense constant. The Ascend TritonToLinalg path classifies a
+  // splat-of-constant dot accumulator as a MetaUse (UseAnalysis) and erases it,
+  // but MatmulConverter then consumes adaptor.getC() directly; with the splat
+  // erased that leaves a null `unrealized_conversion_cast` as the matmul init
+  // and the partial conversion fails ("unresolved materialization remained
+  // live"). Folding keeps the accumulator a constant so it lowers via the
+  // DataUse path (tensor.empty + linalg.fill). The dot line is unaffected: the
+  // accumulator splat is a synthetic zero-init and is never a NOP anchor.
+  if (::mlir::triton::tools::getBoolEnv("LLVM_EXTRACT_DI_LOCAL_VARIABLES")) {
+    bool feedsDotAccumulator =
+        llvm::any_of(getResult().getUsers(), [&](Operation *user) {
+          auto dot = dyn_cast<DotOp>(user);
+          return dot && dot.getC() == getResult();
+        });
+    if (!feedsDotAccumulator)
+      return {};
+  }
   auto shapedType = cast<ShapedType>(getType());
   auto ret = SplatElementsAttr::get(shapedType, ArrayRef<Attribute>(value));
   return ret;
@@ -745,6 +767,10 @@ LogicalResult BroadcastOp::canonicalize(BroadcastOp op,
 }
 
 OpFoldResult BroadcastOp::fold(FoldAdaptor adaptor) {
+  // msdebug: suppress constant-folding so the broadcast op (and its source
+  // line) survives for a debug NOP anchor. Opt-in; no effect in production.
+  if (::mlir::triton::tools::getBoolEnv("LLVM_EXTRACT_DI_LOCAL_VARIABLES"))
+    return {};
   if (getType() == getSrc().getType()) {
     // no-op
     return getSrc();
