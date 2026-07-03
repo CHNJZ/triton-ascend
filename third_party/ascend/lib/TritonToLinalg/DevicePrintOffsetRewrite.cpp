@@ -62,7 +62,7 @@ static Value materializeIndex(OpBuilder &bd, Location loc, OpFoldResult ofr) {
     int64_t v = cast<IntegerAttr>(attr).getInt();
     return bd.create<arith::ConstantIndexOp>(loc, v);
   }
-  auto val = ofr.get<Value>();
+  auto val = llvm::cast<Value>(ofr);
   Type ty = val.getType();
   if (ty.isIndex()) return val;
   if (isa<IntegerType>(ty))
@@ -111,9 +111,9 @@ private:
     if (auto dense = dyn_cast<DenseIntElementsAttr>(op.getValue()))
       if (dense.isSplat())
         return bd.create<arith::ConstantIntOp>(
-            loc, dense.getSplatValue<APInt>().getSExtValue(), i32Ty);
+            loc, dense.getSplatValue<APInt>().getSExtValue(), i32Ty.getWidth());
     if (auto intAttr = dyn_cast<IntegerAttr>(op.getValue()))
-      return bd.create<arith::ConstantIntOp>(loc, intAttr.getInt(), i32Ty);
+      return bd.create<arith::ConstantIntOp>(loc, intAttr.getInt(), i32Ty.getWidth());
     return nullptr;
   }
 
@@ -125,7 +125,7 @@ private:
 
     if (auto cstOp = sc.getDefiningOp<arith::ConstantOp>()) {
       if (auto intAttr = dyn_cast<IntegerAttr>(cstOp.getValue()))
-        return bd.create<arith::ConstantIntOp>(loc, intAttr.getInt(), i32Ty);
+        return bd.create<arith::ConstantIntOp>(loc, intAttr.getInt(), i32Ty.getWidth());
       return nullptr;
     }
     if (scTy.isInteger(32)) return sc;
@@ -149,7 +149,7 @@ private:
       off = a.getInt();
     Value v32 = bd.create<arith::IndexCastOp>(loc, i32Ty, indices[0]);
     if (off != 0) {
-      Value oc = bd.create<arith::ConstantIntOp>(loc, off, i32Ty);
+      Value oc = bd.create<arith::ConstantIntOp>(loc, off, i32Ty.getWidth());
       v32 = bd.create<arith::AddIOp>(loc, v32, oc);
     }
     return v32;

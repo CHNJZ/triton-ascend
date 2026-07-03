@@ -419,7 +419,7 @@ static Value materializeI64(OpFoldResult ofr, Location loc,
         return rewriter.create<arith::ConstantOp>(
             loc, rewriter.getI64IntegerAttr(value));
     }
-    return ensureI64Scalar(ofr.get<Value>(), loc, rewriter);
+    return ensureI64Scalar(llvm::cast<Value>(ofr), loc, rewriter);
 }
 
 static Value clampI64(Value value, Value lower, Value upper, Location loc,
