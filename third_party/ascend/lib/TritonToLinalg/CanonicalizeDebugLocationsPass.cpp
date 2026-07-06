@@ -41,8 +41,6 @@
 #include "mlir/IR/Location.h"
 #include "mlir/Pass/Pass.h"
 
-#include "triton/Tools/Sys/GetEnv.hpp"
-
 #include "llvm/Support/Debug.h"
 
 #define DEBUG_TYPE "canonicalize-debug-locations"

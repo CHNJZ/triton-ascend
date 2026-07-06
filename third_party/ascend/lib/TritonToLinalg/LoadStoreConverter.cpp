@@ -243,6 +243,7 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
   auto mask = op.getMask();
   auto other = op.getOther();
   auto loc = op.getLoc();
+  insertDebugNopForMask(mask, rewriter);
 
   // handling scalar
   if (!isa<ShapedType>(op.getResult().getType())) {
@@ -585,6 +586,7 @@ AtomicRMWConverter::matchAndRewrite(triton::AtomicRMWOp op, OpAdaptor adaptor,
   auto resType = dyn_cast<TensorType>(op.getResult().getType());
   auto ptrType = dyn_cast<MemRefType>(ptr.getType());
   insertDebugNop(loc, rewriter);
+  insertDebugNopForMask(mask, rewriter);
   if (!resType)
     return rewriter.notifyMatchFailure(
         op, "atomicRMWConverter: scalar will be handled by "
@@ -1103,6 +1105,7 @@ StoreConverter::matchAndRewrite(triton::StoreOp op, OpAdaptor adaptor,
   // triton store op basic
   auto mask = op.getMask();
   auto loc = op.getLoc();
+  insertDebugNopForMask(mask, rewriter);
   auto ptr = adaptor.getPtr();
   auto val = adaptor.getValue();
 

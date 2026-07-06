@@ -43,8 +43,6 @@
 #include "mlir/IR/Location.h"
 #include "mlir/Pass/Pass.h"
 
-#include "triton/Tools/Sys/GetEnv.hpp"
-
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"

@@ -23,13 +23,19 @@
 // DebugUtils.cpp
 //
 // Implementations for DebugUtils.h:
-//   * TRITON_DEBUG-gated NOP insertion helpers (unchanged behaviour), and
+//   * LLVM_EXTRACT_DI_LOCAL_VARIABLES-gated NOP insertion helpers (unchanged
+//   behaviour), and
 //   * the shared location analysis / rewrite helpers used by
 //     CanonicalizeDebugLocationsPass and DeduplicateDebugNopsPass.
 //===----------------------------------------------------------------------===//
-
 #include "Utils/DebugUtils.h"
-
+#include <algorithm>
+#include <cstdlib>
+#include <functional>
+#include <llvm/ADT/DenseSet.h>
+#include <llvm/ADT/STLExtras.h>
+#include <llvm/ADT/SmallVector.h>
+#include <llvm/ADT/StringRef.h>
 #include <mlir/Dialect/LLVMIR/LLVMDialect.h>
 #include <mlir/IR/Builders.h>
 #include <mlir/IR/BuiltinAttributes.h>
@@ -37,24 +43,14 @@
 #include <mlir/IR/Operation.h>
 #include <mlir/IR/PatternMatch.h>
 #include <mlir/Transforms/DialectConversion.h>
-
+#include <string>
 #include <triton/Tools/Sys/GetEnv.hpp>
-
-#include <llvm/ADT/DenseSet.h>
-#include <llvm/ADT/STLExtras.h>
-#include <llvm/ADT/SmallVector.h>
-#include <llvm/ADT/StringRef.h>
-
-#include <functional>
 #include <utility>
-
 using namespace mlir;
-
 //===----------------------------------------------------------------------===//
-// NOP insertion helpers (gated by TRITON_DEBUG). Behaviour unchanged from the
-// previous header-inline versions.
+// NOP insertion helpers (gated by LLVM_EXTRACT_DI_LOCAL_VARIABLES). Behaviour
+// unchanged from the previous header-inline versions.
 //===----------------------------------------------------------------------===//
-
 Location unwrapFusedLocForDebug(Location loc) {
   if (auto cs = dyn_cast<CallSiteLoc>(loc))
     return unwrapFusedLocForDebug(cs.getCaller());
@@ -66,12 +62,10 @@ Location unwrapFusedLocForDebug(Location loc) {
   }
   return loc;
 }
-
 void insertDebugNop(Location loc, PatternRewriter &rewriter) {
   if (!mlir::triton::debug::isMsdebugEnabled())
     return;
   auto unwrapped = unwrapFusedLocForDebug(loc);
-
   auto ctx = rewriter.getContext();
   rewriter.create<LLVM::InlineAsmOp>(
       unwrapped,
@@ -83,53 +77,58 @@ void insertDebugNop(Location loc, PatternRewriter &rewriter) {
       /*is_align_stack=*/false, LLVM::tailcallkind::TailCallKind::None,
       LLVM::AsmDialectAttr::get(ctx, LLVM::AsmDialect::AD_ATT), ArrayAttr());
 }
-
+void insertDebugNopForMask(mlir::Value mask, mlir::PatternRewriter &rewriter) {
+  if (!mask)
+    return;
+  if (mlir::Operation *def = mask.getDefiningOp())
+    insertDebugNop(unwrapFusedLocForDebug(def->getLoc()), rewriter);
+}
+static void
+collectUserLineLocs(Location loc,
+                    llvm::SmallDenseSet<std::pair<unsigned, unsigned>> &seen,
+                    llvm::SmallVectorImpl<Location> &out) {
+  if (auto cs = dyn_cast<CallSiteLoc>(loc)) {
+    collectUserLineLocs(cs.getCaller(), seen, out); // user frame
+    return;
+  }
+  if (auto named = dyn_cast<NameLoc>(loc)) {
+    collectUserLineLocs(named.getChildLoc(), seen, out); // peel NameLoc
+    return;
+  }
+  if (auto fused = dyn_cast<FusedLoc>(loc)) {
+    for (Location inner : fused.getLocations())
+      collectUserLineLocs(inner, seen, out); // recurse nested
+    return;
+  }
+  if (auto flc = dyn_cast<FileLineColLoc>(loc))
+    if (seen.insert({flc.getLine(), flc.getColumn()}).second)
+      out.push_back(loc);
+}
 void insertDebugNopForAllLines(Location loc,
                                ConversionPatternRewriter &rewriter) {
   if (!mlir::triton::debug::isMsdebugEnabled())
     return;
-
-  std::function<Location(Location)> deepUnwrap = [&](Location x) -> Location {
-    if (auto cs = dyn_cast<CallSiteLoc>(x))
-      return deepUnwrap(cs.getCaller());
-    if (auto n = dyn_cast<NameLoc>(x))
-      return deepUnwrap(n.getChildLoc());
-    if (auto f = dyn_cast<FusedLoc>(x)) {
-      for (auto inner : llvm::reverse(f.getLocations()))
-        if (!isa<UnknownLoc>(inner))
-          return deepUnwrap(inner);
-    }
-    return x;
-  };
-
-  if (auto fused = dyn_cast<FusedLoc>(loc)) {
-    llvm::SmallDenseSet<std::pair<unsigned, unsigned>> seen;
-    for (auto inner : fused.getLocations()) {
-      auto u = deepUnwrap(inner);
-      if (auto flc = dyn_cast<FileLineColLoc>(u)) {
-        if (seen.insert({flc.getLine(), flc.getColumn()}).second)
-          insertDebugNop(u, rewriter);
-      }
-    }
+  llvm::SmallDenseSet<std::pair<unsigned, unsigned>> seen;
+  llvm::SmallVector<Location, 4> lineLocs;
+  collectUserLineLocs(loc, seen, lineLocs);
+  if (lineLocs.empty()) {
+    insertDebugNop(loc, rewriter); // no concrete line found → single anchor
     return;
   }
-  insertDebugNop(loc, rewriter);
+  for (Location l : lineLocs)
+    insertDebugNop(l, rewriter);
 }
-
 //===----------------------------------------------------------------------===//
 // Shared location analysis / rewrite helpers (no self-gating; passes gate).
 //===----------------------------------------------------------------------===//
-
 namespace mlir {
 namespace triton {
 namespace debug {
-
 bool isForeignFile(llvm::StringRef filename) {
   // A library/stdlib file inlined into the kernel (e.g. triton/language/
   // standard.py). Heuristic: lives under a site-packages tree.
   return filename.contains("/site-packages/");
 }
-
 bool isDebugNop(Operation *op) {
   auto asmOp = dyn_cast<LLVM::InlineAsmOp>(op);
   if (!asmOp)
@@ -143,7 +142,6 @@ bool isDebugNop(Operation *op) {
     return false;
   return true;
 }
-
 FileLineColLoc unwrapToUserFileLineCol(Location loc) {
   // Reuse the existing caller-preferring unwrapper, then descend NameLoc to the
   // underlying FileLineColLoc. callsite(stdlib at user) -> the user's line.
@@ -152,18 +150,15 @@ FileLineColLoc unwrapToUserFileLineCol(Location loc) {
     l = named.getChildLoc();
   return dyn_cast<FileLineColLoc>(l);
 }
-
 Location collapseForeignCallsites(Location loc, unsigned depth) {
   if (depth > 16)
     return loc;
-
   if (auto named = dyn_cast<NameLoc>(loc)) {
     Location child = collapseForeignCallsites(named.getChildLoc(), depth + 1);
     return child == named.getChildLoc()
                ? loc
                : Location(NameLoc::get(named.getName(), child));
   }
-
   if (auto cs = dyn_cast<CallSiteLoc>(loc)) {
     Location caller = collapseForeignCallsites(cs.getCaller(), depth + 1);
     // The callee is the inlined helper frame; resolve its own file. (The
@@ -176,7 +171,6 @@ Location collapseForeignCallsites(Location loc, unsigned depth) {
       return loc;
     return Location(CallSiteLoc::get(callee, caller));
   }
-
   if (auto fused = dyn_cast<FusedLoc>(loc)) {
     llvm::SmallVector<Location> newLocs;
     bool changed = false;
@@ -189,10 +183,8 @@ Location collapseForeignCallsites(Location loc, unsigned depth) {
                                             fused.getMetadata()))
                    : loc;
   }
-
   return loc;
 }
-
 bool isMsdebugEnabled() {
   const char *s = std::getenv("LLVM_EXTRACT_DI_LOCAL_VARIABLES");
   if (!s)
@@ -202,7 +194,6 @@ bool isMsdebugEnabled() {
                  [](unsigned char c) { return std::tolower(c); });
   return v == "1" || v == "true" || v == "on";
 }
-
 } // namespace debug
 } // namespace triton
 } // namespace mlir

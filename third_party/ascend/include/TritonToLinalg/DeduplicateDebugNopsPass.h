@@ -23,8 +23,8 @@
 #ifndef TRITON_ASCEND_TRITONTOLINALG_DEDUPLICATE_DEBUG_NOPS_H
 #define TRITON_ASCEND_TRITONTOLINALG_DEDUPLICATE_DEBUG_NOPS_H
 
-#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Pass/Pass.h"
+#include <memory>
 
 namespace mlir {
 namespace triton {

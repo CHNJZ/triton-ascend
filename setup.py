@@ -1054,6 +1054,7 @@ def get_install_requirements():
         "pyyaml",
         "pybind11",
         "pandas",
+        "pyelftools>=0.29",
     ]
     arch = get_architecture()
     return [*install_requires, *ARCHITECTURE_DEPENDENCIES[arch]]

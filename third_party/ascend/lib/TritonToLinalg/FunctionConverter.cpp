@@ -54,7 +54,6 @@ LogicalResult GetNumProgramsConverter::matchAndRewrite(
   auto numArgs = func.getNumArguments();
   auto id = func.getArgument(
       numArgs - GetNumProgramsConverter::LAUNCH_GRID_RANK * 2 + axis);
-  bool debugMode = false;
 
   Location numProgsLoc = op.getLoc();
   insertDebugNop(numProgsLoc, rewriter);
