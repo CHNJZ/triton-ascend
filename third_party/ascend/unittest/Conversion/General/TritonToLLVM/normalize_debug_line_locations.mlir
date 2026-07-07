@@ -355,3 +355,216 @@ return %r : i32 loc("shape.py":6:3)
 // CHECK-DAG: #[[SHAPE_LOAD_LOC]] = loc("shape.py":3:5)
 // CHECK-DAG: #[[SHAPE_ADDI_LOC]] = loc("shape.py":5:5)
 // CHECK-DAG: #[[SHAPE_RETURN_LOC]] = loc("shape.py":6:3)
+
+// -----
+
+module {
+func.func @direct_destination_view_ambiguity(%src: tensor<4xf32>, %dst: memref<8xf32>, %idx: index) {
+%view = memref.subview %dst[%idx] [4] [1] : memref<8xf32> to memref<4xf32, strided<[1], offset: ?>> loc("direct_ambiguity.py":10:5)
+bufferization.materialize_in_destination %src in writable %view : (tensor<4xf32>, memref<4xf32, strided<[1], offset: ?>>) -> () loc("direct_ambiguity.py":10:20)
+bufferization.materialize_in_destination %src in writable %view : (tensor<4xf32>, memref<4xf32, strided<[1], offset: ?>>) -> () loc("direct_ambiguity.py":10:30)
+func.return loc("direct_ambiguity.py":11:3)
+}
+}
+
+// CHECK-DAG: #[[$DIRECT_AMBIGUITY_ORIGIN:[A-Za-z0-9_]+]] = loc("direct_ambiguity.py":10:5)
+
+// CHECK-LABEL: func.func @direct_destination_view_ambiguity
+// CHECK: %[[DIRECT_AMBIGUOUS_VIEW:[A-Za-z0-9_]+]] = memref.subview
+// CHECK-SAME: triton.debug_line.class = "synthetic"
+// CHECK-SAME: triton.debug_line.origin = #[[$DIRECT_AMBIGUITY_ORIGIN]]
+// CHECK-SAME: loc(#[[DIRECT_AMBIGUITY_SYNTH_LOC:[A-Za-z0-9_]+]])
+// CHECK: bufferization.materialize_in_destination %{{.*}} in writable %[[DIRECT_AMBIGUOUS_VIEW]]
+// CHECK-SAME: triton.debug_line.class = "semantic"
+// CHECK-SAME: loc(#[[DIRECT_STORE_0_LOC:[A-Za-z0-9_]+]])
+// CHECK: bufferization.materialize_in_destination %{{.*}} in writable %[[DIRECT_AMBIGUOUS_VIEW]]
+// CHECK-SAME: triton.debug_line.class = "semantic"
+// CHECK-SAME: loc(#[[DIRECT_STORE_1_LOC:[A-Za-z0-9_]+]])
+
+// CHECK-DAG: #[[DIRECT_AMBIGUITY_SYNTH_LOC]] = loc("direct_ambiguity.py":0:0)
+// CHECK-DAG: #[[DIRECT_STORE_0_LOC]] = loc("direct_ambiguity.py":10:20)
+// CHECK-DAG: #[[DIRECT_STORE_1_LOC]] = loc("direct_ambiguity.py":10:30)
+
+// -----
+
+module {
+func.func @through_destination_view_ambiguity(%src: tensor<4xf32>, %dst0: memref<8xf32>, %dst1: memref<8xf32>, %offset: i32) {
+%idx = arith.index_cast %offset : i32 to index loc("through_view_ambiguity.py":20:5)
+%view0 = memref.subview %dst0[%idx] [4] [1] : memref<8xf32> to memref<4xf32, strided<[1], offset: ?>> loc("through_view_ambiguity.py":21:5)
+bufferization.materialize_in_destination %src in writable %view0 : (tensor<4xf32>, memref<4xf32, strided<[1], offset: ?>>) -> () loc("through_view_ambiguity.py":21:20)
+%view1 = memref.subview %dst1[%idx] [4] [1] : memref<8xf32> to memref<4xf32, strided<[1], offset: ?>> loc("through_view_ambiguity.py":22:5)
+bufferization.materialize_in_destination %src in writable %view1 : (tensor<4xf32>, memref<4xf32, strided<[1], offset: ?>>) -> () loc("through_view_ambiguity.py":22:20)
+func.return loc("through_view_ambiguity.py":23:3)
+}
+}
+
+// CHECK-DAG: #[[$THROUGH_VIEW_AMBIGUITY_ORIGIN:[A-Za-z0-9_]+]] = loc("through_view_ambiguity.py":20:5)
+
+// CHECK-LABEL: func.func @through_destination_view_ambiguity
+// CHECK: %[[THROUGH_VIEW_IDX:[A-Za-z0-9_]+]] = arith.index_cast
+// CHECK-SAME: triton.debug_line.class = "synthetic"
+// CHECK-SAME: triton.debug_line.origin = #[[$THROUGH_VIEW_AMBIGUITY_ORIGIN]]
+// CHECK-SAME: loc(#[[THROUGH_VIEW_AMBIGUITY_SYNTH_LOC:[A-Za-z0-9_]+]])
+// CHECK: %[[THROUGH_VIEW_0:[A-Za-z0-9_]+]] = memref.subview {{.*}}[%[[THROUGH_VIEW_IDX]]]
+// CHECK-SAME: triton.debug_line.class = "semantic"
+// CHECK-SAME: loc(#[[THROUGH_VIEW_STORE_0_LOC:[A-Za-z0-9_]+]])
+// CHECK: %[[THROUGH_VIEW_1:[A-Za-z0-9_]+]] = memref.subview {{.*}}[%[[THROUGH_VIEW_IDX]]]
+// CHECK-SAME: triton.debug_line.class = "semantic"
+// CHECK-SAME: loc(#[[THROUGH_VIEW_STORE_1_LOC:[A-Za-z0-9_]+]])
+
+// CHECK-DAG: #[[THROUGH_VIEW_AMBIGUITY_SYNTH_LOC]] = loc("through_view_ambiguity.py":0:0)
+// CHECK-DAG: #[[THROUGH_VIEW_STORE_0_LOC]] = loc("through_view_ambiguity.py":21:20)
+// CHECK-DAG: #[[THROUGH_VIEW_STORE_1_LOC]] = loc("through_view_ambiguity.py":22:20)
+
+// -----
+
+module {
+func.func @through_tensor_insert_ambiguity(%lhs: f32, %rhs: f32, %base0: tensor<1xf32>, %base1: tensor<1xf32>, %dst0: memref<1xf32>, %dst1: memref<1xf32>, %idx: index) {
+%sum = arith.addf %lhs, %rhs : f32 loc("tensor_insert_ambiguity.py":30:5)
+%inserted0 = tensor.insert %sum into %base0[%idx] : tensor<1xf32> loc("tensor_insert_ambiguity.py":30:10)
+bufferization.materialize_in_destination %inserted0 in writable %dst0 : (tensor<1xf32>, memref<1xf32>) -> () loc("tensor_insert_ambiguity.py":30:30)
+%inserted1 = tensor.insert %sum into %base1[%idx] : tensor<1xf32> loc("tensor_insert_ambiguity.py":30:11)
+bufferization.materialize_in_destination %inserted1 in writable %dst1 : (tensor<1xf32>, memref<1xf32>) -> () loc("tensor_insert_ambiguity.py":30:40)
+func.return loc("tensor_insert_ambiguity.py":31:3)
+}
+}
+
+// CHECK-DAG: #[[$TENSOR_INSERT_AMBIGUITY_ORIGIN:[A-Za-z0-9_]+]] = loc("tensor_insert_ambiguity.py":30:5)
+
+// CHECK-LABEL: func.func @through_tensor_insert_ambiguity
+// CHECK: %[[TENSOR_INSERT_SUM:[A-Za-z0-9_]+]] = arith.addf
+// CHECK-SAME: triton.debug_line.class = "synthetic"
+// CHECK-SAME: triton.debug_line.origin = #[[$TENSOR_INSERT_AMBIGUITY_ORIGIN]]
+// CHECK-SAME: loc(#[[TENSOR_INSERT_AMBIGUITY_SYNTH_LOC:[A-Za-z0-9_]+]])
+// CHECK: %[[TENSOR_INSERTED_0:[A-Za-z0-9_]+]] = tensor.insert %[[TENSOR_INSERT_SUM]]
+// CHECK: bufferization.materialize_in_destination %[[TENSOR_INSERTED_0]]
+// CHECK-SAME: loc(#[[TENSOR_INSERT_STORE_0_LOC:[A-Za-z0-9_]+]])
+// CHECK: %[[TENSOR_INSERTED_1:[A-Za-z0-9_]+]] = tensor.insert %[[TENSOR_INSERT_SUM]]
+// CHECK: bufferization.materialize_in_destination %[[TENSOR_INSERTED_1]]
+// CHECK-SAME: loc(#[[TENSOR_INSERT_STORE_1_LOC:[A-Za-z0-9_]+]])
+
+// CHECK-DAG: #[[TENSOR_INSERT_AMBIGUITY_SYNTH_LOC]] = loc("tensor_insert_ambiguity.py":0:0)
+// CHECK-DAG: #[[TENSOR_INSERT_STORE_0_LOC]] = loc("tensor_insert_ambiguity.py":30:30)
+// CHECK-DAG: #[[TENSOR_INSERT_STORE_1_LOC]] = loc("tensor_insert_ambiguity.py":30:40)
+
+// -----
+
+module {
+func.func @duplicate_canonical_store_candidates(%src: tensor<4xf32>, %dst: memref<8xf32>, %idx: index) {
+%view = memref.subview %dst[%idx] [4] [1] : memref<8xf32> to memref<4xf32, strided<[1], offset: ?>> loc("duplicate_candidates.py":40:5)
+bufferization.materialize_in_destination %src in writable %view : (tensor<4xf32>, memref<4xf32, strided<[1], offset: ?>>) -> () loc("synthetic_store"("duplicate_candidates.py":40:30))
+bufferization.materialize_in_destination %src in writable %view : (tensor<4xf32>, memref<4xf32, strided<[1], offset: ?>>) -> () loc("duplicate_candidates.py":40:30)
+func.return loc("duplicate_candidates.py":41:3)
+}
+}
+
+// CHECK-DAG: #[[$DUPLICATE_VIEW_ORIGIN:[A-Za-z0-9_]+]] = loc("duplicate_candidates.py":40:5)
+
+// CHECK-LABEL: func.func @duplicate_canonical_store_candidates
+// CHECK: %[[DUPLICATE_VIEW:[A-Za-z0-9_]+]] = memref.subview
+// CHECK-SAME: triton.debug_line.class = "semantic"
+// CHECK-SAME: triton.debug_line.origin = #[[$DUPLICATE_VIEW_ORIGIN]]
+// CHECK-SAME: loc(#[[DUPLICATE_STORE_LOC:[A-Za-z0-9_]+]])
+// CHECK: bufferization.materialize_in_destination %{{.*}} in writable %[[DUPLICATE_VIEW]]
+// CHECK-SAME: triton.debug_line.class = "semantic"
+// CHECK-SAME: loc(#[[DUPLICATE_STORE_LOC]])
+// CHECK: bufferization.materialize_in_destination %{{.*}} in writable %[[DUPLICATE_VIEW]]
+// CHECK-SAME: triton.debug_line.class = "semantic"
+// CHECK-SAME: loc(#[[DUPLICATE_STORE_LOC]])
+
+// CHECK-DAG: #[[DUPLICATE_STORE_LOC]] = loc("duplicate_candidates.py":40:30)
+
+// -----
+
+module {
+func.func @direct_and_nested_destination_view_ambiguity(%src: tensor<4xf32>, %dst: memref<8xf32>, %idx: index) {
+%view = memref.subview %dst[%idx] [4] [1] : memref<8xf32> to memref<4xf32, strided<[1], offset: ?>> loc("cross_view_ambiguity.py":50:5)
+bufferization.materialize_in_destination %src in writable %view : (tensor<4xf32>, memref<4xf32, strided<[1], offset: ?>>) -> () loc("cross_view_ambiguity.py":50:20)
+bufferization.materialize_in_destination %src in writable %view : (tensor<4xf32>, memref<4xf32, strided<[1], offset: ?>>) -> () loc("cross_view_ambiguity.py":50:30)
+%nested = memref.subview %view[0] [4] [1] : memref<4xf32, strided<[1], offset: ?>> to memref<4xf32, strided<[1], offset: ?>> loc("cross_view_ambiguity.py":51:5)
+bufferization.materialize_in_destination %src in writable %nested : (tensor<4xf32>, memref<4xf32, strided<[1], offset: ?>>) -> () loc("cross_view_ambiguity.py":51:20)
+func.return loc("cross_view_ambiguity.py":52:3)
+}
+}
+
+// CHECK-DAG: #[[$CROSS_VIEW_ORIGIN:[A-Za-z0-9_]+]] = loc("cross_view_ambiguity.py":50:5)
+
+// CHECK-LABEL: func.func @direct_and_nested_destination_view_ambiguity
+// CHECK: %[[CROSS_VIEW:[A-Za-z0-9_]+]] = memref.subview
+// CHECK-SAME: triton.debug_line.class = "synthetic"
+// CHECK-SAME: triton.debug_line.origin = #[[$CROSS_VIEW_ORIGIN]]
+// CHECK-SAME: loc(#[[CROSS_VIEW_SYNTH_LOC:[A-Za-z0-9_]+]])
+// CHECK: bufferization.materialize_in_destination %{{.*}} in writable %[[CROSS_VIEW]]
+// CHECK-SAME: loc(#[[CROSS_VIEW_STORE_A:[A-Za-z0-9_]+]])
+// CHECK: bufferization.materialize_in_destination %{{.*}} in writable %[[CROSS_VIEW]]
+// CHECK-SAME: loc(#[[CROSS_VIEW_STORE_B:[A-Za-z0-9_]+]])
+// CHECK: %[[CROSS_NESTED:[A-Za-z0-9_]+]] = memref.subview %[[CROSS_VIEW]]
+// CHECK: bufferization.materialize_in_destination %{{.*}} in writable %[[CROSS_NESTED]]
+// CHECK-SAME: loc(#[[CROSS_VIEW_STORE_C:[A-Za-z0-9_]+]])
+
+// CHECK-DAG: #[[CROSS_VIEW_SYNTH_LOC]] = loc("cross_view_ambiguity.py":0:0)
+// CHECK-DAG: #[[CROSS_VIEW_STORE_A]] = loc("cross_view_ambiguity.py":50:20)
+// CHECK-DAG: #[[CROSS_VIEW_STORE_B]] = loc("cross_view_ambiguity.py":50:30)
+// CHECK-DAG: #[[CROSS_VIEW_STORE_C]] = loc("cross_view_ambiguity.py":51:20)
+
+// -----
+
+module {
+func.func @destination_view_and_tensor_insert_ambiguity(%offset: i32, %src: tensor<1xindex>, %base: tensor<1xindex>, %dst0: memref<4xindex>, %dst1: memref<1xindex>) {
+%c0 = arith.constant 0 : index loc("cross_path_ambiguity.py":60:3)
+%idx = arith.index_cast %offset : i32 to index loc("cross_path_ambiguity.py":60:5)
+%view = memref.subview %dst0[%idx] [1] [1] : memref<4xindex> to memref<1xindex, strided<[1], offset: ?>> loc("cross_path_ambiguity.py":61:5)
+bufferization.materialize_in_destination %src in writable %view : (tensor<1xindex>, memref<1xindex, strided<[1], offset: ?>>) -> () loc("cross_path_ambiguity.py":61:20)
+%inserted = tensor.insert %idx into %base[%c0] : tensor<1xindex> loc("cross_path_ambiguity.py":62:5)
+bufferization.materialize_in_destination %inserted in writable %dst1 : (tensor<1xindex>, memref<1xindex>) -> () loc("cross_path_ambiguity.py":62:20)
+func.return loc("cross_path_ambiguity.py":63:3)
+}
+}
+
+// CHECK-DAG: #[[$CROSS_PATH_AMBIGUITY_ORIGIN:[A-Za-z0-9_]+]] = loc("cross_path_ambiguity.py":60:5)
+
+// CHECK-LABEL: func.func @destination_view_and_tensor_insert_ambiguity
+// CHECK: %[[CROSS_PATH_IDX:[A-Za-z0-9_]+]] = arith.index_cast
+// CHECK-SAME: triton.debug_line.class = "synthetic"
+// CHECK-SAME: triton.debug_line.origin = #[[$CROSS_PATH_AMBIGUITY_ORIGIN]]
+// CHECK-SAME: loc(#[[CROSS_PATH_SYNTH_LOC:[A-Za-z0-9_]+]])
+// CHECK: %[[CROSS_PATH_VIEW:[A-Za-z0-9_]+]] = memref.subview {{.*}}[%[[CROSS_PATH_IDX]]]
+// CHECK: bufferization.materialize_in_destination %{{.*}} in writable %[[CROSS_PATH_VIEW]]
+// CHECK-SAME: loc(#[[CROSS_PATH_STORE_A:[A-Za-z0-9_]+]])
+// CHECK: %[[CROSS_PATH_INSERTED:[A-Za-z0-9_]+]] = tensor.insert %[[CROSS_PATH_IDX]]
+// CHECK: bufferization.materialize_in_destination %[[CROSS_PATH_INSERTED]]
+// CHECK-SAME: loc(#[[CROSS_PATH_STORE_B:[A-Za-z0-9_]+]])
+
+// CHECK-DAG: #[[CROSS_PATH_SYNTH_LOC]] = loc("cross_path_ambiguity.py":0:0)
+// CHECK-DAG: #[[CROSS_PATH_STORE_A]] = loc("cross_path_ambiguity.py":61:20)
+// CHECK-DAG: #[[CROSS_PATH_STORE_B]] = loc("cross_path_ambiguity.py":62:20)
+
+// -----
+
+module {
+func.func @matching_destination_view_and_tensor_insert_candidates(%offset: i32, %src: tensor<1xindex>, %base: tensor<1xindex>, %dst0: memref<4xindex>, %dst1: memref<1xindex>) {
+%c0 = arith.constant 0 : index loc("cross_path_unique.py":70:3)
+%idx = arith.index_cast %offset : i32 to index loc("cross_path_unique.py":70:5)
+%view = memref.subview %dst0[%idx] [1] [1] : memref<4xindex> to memref<1xindex, strided<[1], offset: ?>> loc("cross_path_unique.py":71:5)
+bufferization.materialize_in_destination %src in writable %view : (tensor<1xindex>, memref<1xindex, strided<[1], offset: ?>>) -> () loc("synthetic_store"("cross_path_unique.py":71:20))
+%inserted = tensor.insert %idx into %base[%c0] : tensor<1xindex> loc("cross_path_unique.py":71:6)
+bufferization.materialize_in_destination %inserted in writable %dst1 : (tensor<1xindex>, memref<1xindex>) -> () loc("cross_path_unique.py":71:20)
+func.return loc("cross_path_unique.py":72:3)
+}
+}
+
+// CHECK-DAG: #[[$CROSS_PATH_UNIQUE_ORIGIN:[A-Za-z0-9_]+]] = loc("cross_path_unique.py":70:5)
+
+// CHECK-LABEL: func.func @matching_destination_view_and_tensor_insert_candidates
+// CHECK: %[[CROSS_PATH_UNIQUE_IDX:[A-Za-z0-9_]+]] = arith.index_cast
+// CHECK-SAME: triton.debug_line.class = "semantic"
+// CHECK-SAME: triton.debug_line.origin = #[[$CROSS_PATH_UNIQUE_ORIGIN]]
+// CHECK-SAME: loc(#[[CROSS_PATH_UNIQUE_STORE:[A-Za-z0-9_]+]])
+// CHECK: %[[CROSS_PATH_UNIQUE_VIEW:[A-Za-z0-9_]+]] = memref.subview {{.*}}[%[[CROSS_PATH_UNIQUE_IDX]]]
+// CHECK: bufferization.materialize_in_destination %{{.*}} in writable %[[CROSS_PATH_UNIQUE_VIEW]]
+// CHECK-SAME: loc(#[[CROSS_PATH_UNIQUE_STORE]])
+// CHECK: %[[CROSS_PATH_UNIQUE_INSERTED:[A-Za-z0-9_]+]] = tensor.insert %[[CROSS_PATH_UNIQUE_IDX]]
+// CHECK: bufferization.materialize_in_destination %[[CROSS_PATH_UNIQUE_INSERTED]]
+// CHECK-SAME: loc(#[[CROSS_PATH_UNIQUE_STORE]])
+
+// CHECK-DAG: #[[CROSS_PATH_UNIQUE_STORE]] = loc("cross_path_unique.py":71:20)

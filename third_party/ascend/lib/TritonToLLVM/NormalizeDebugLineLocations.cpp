@@ -9,7 +9,9 @@
 #include "mlir/IR/OperationSupport.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Pass/Pass.h"
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/StringSwitch.h"
@@ -43,6 +45,8 @@ struct SourceLine {
     return file == rhs.file && line == rhs.line;
   }
 
+  bool operator!=(const SourceLine &rhs) const { return !(*this == rhs); }
+
   std::string getKey() const {
     if (!*this)
       return {};
@@ -54,31 +58,15 @@ struct SourceLine {
   }
 };
 
-bool isContainerOp(Operation *op) {
-  return llvm::StringSwitch<bool>(op->getName().getStringRef())
-      .Case("builtin.module", true)
-      .Case("func.func", true)
-      .Case("llvm.func", true)
-      .Case("tt.func", true)
-      .Default(false);
-}
-
-bool hasRealFileLineColLoc(Location loc) {
-  return static_cast<bool>(loc->findInstanceOf<FileLineColLoc>());
-}
-
-SourceLine getSourceLine(Location loc) {
-  if (auto fileLoc = loc->findInstanceOf<FileLineColLoc>())
-    return {fileLoc.getFilename(), fileLoc.getLine()};
-
-  return {};
-}
-
 bool isInternalName(StringRef name) {
   return name.contains("synthetic") || name.contains("lowering") ||
          name.contains("helper") || name.contains("tmp") ||
          name.contains("__") || name.starts_with("llvm.") ||
          name.starts_with("triton.");
+}
+
+bool hasRealFileLineColLoc(Location loc) {
+  return static_cast<bool>(loc->findInstanceOf<FileLineColLoc>());
 }
 
 Location canonicalizeSourceLoc(Location loc) {
@@ -99,9 +87,25 @@ Location canonicalizeSourceLoc(Location loc) {
   return loc;
 }
 
+SourceLine getSourceLine(Location loc) {
+  if (auto fileLoc = loc->findInstanceOf<FileLineColLoc>())
+    return {fileLoc.getFilename(), fileLoc.getLine()};
+
+  return {};
+}
+
 bool hasSourceLikeLocation(Operation *op) {
   Location loc = canonicalizeSourceLoc(op->getLoc());
   return !isa<UnknownLoc>(loc) && hasRealFileLineColLoc(loc);
+}
+
+bool isContainerOp(Operation *op) {
+  return llvm::StringSwitch<bool>(op->getName().getStringRef())
+      .Case("builtin.module", true)
+      .Case("func.func", true)
+      .Case("llvm.func", true)
+      .Case("tt.func", true)
+      .Default(false);
 }
 
 bool isControlOp(Operation *op) {
@@ -201,48 +205,6 @@ bool isDestinationViewOp(Operation *op) {
   return name == "memref.reinterpret_cast" || name == "memref.subview";
 }
 
-std::optional<Location>
-getUserVisibleStoreLocForDestinationView(Operation *op) {
-  if (!isDestinationViewOp(op))
-    return std::nullopt;
-
-  if (op->getNumResults() != 1)
-    return std::nullopt;
-
-  SourceLine opLine = getSourceLine(canonicalizeSourceLoc(op->getLoc()));
-  if (!opLine)
-    return std::nullopt;
-
-  Value result = op->getResult(0);
-
-  for (Operation *user : result.getUsers()) {
-    if (!isUserVisibleStoreAnchorOp(user))
-      continue;
-
-    SourceLine userLine = getSourceLine(canonicalizeSourceLoc(user->getLoc()));
-
-    if (!userLine || !(userLine == opLine))
-      continue;
-
-    for (OpOperand &operand : user->getOpOperands()) {
-      if (operand.get() != result)
-        continue;
-
-      // bufferization.materialize_in_destination:
-      //   operand #0 = source tensor/value
-      //   operand #1 = destination memref/view
-      if (operand.getOperandNumber() == 1)
-        return canonicalizeSourceLoc(user->getLoc());
-    }
-  }
-
-  return std::nullopt;
-}
-
-bool isDestinationViewForUserVisibleStore(Operation *op) {
-  return getUserVisibleStoreLocForDestinationView(op).has_value();
-}
-
 bool isValuePreparationOp(Operation *op) {
   StringRef name = op->getName().getStringRef();
 
@@ -269,27 +231,86 @@ bool isAddressComputationOp(Operation *op) {
          name.contains("trunc");
 }
 
-std::optional<Location>
-getUserVisibleStoreLocThroughDestinationView(Operation *op) {
+bool isReorderedBackwardStep(Operation *op, DebugLineLocClass locClass,
+                             SourceLine previousLine) {
+  if (locClass == DebugLineLocClass::Control || !previousLine)
+    return false;
+
+  SourceLine line = getSourceLine(canonicalizeSourceLoc(op->getLoc()));
+  if (!line || line.file != previousLine.file || line.line >= previousLine.line)
+    return false;
+
+  return isMaybeHelperConstant(op) || isArithmeticOrCastOp(op) ||
+         isValuePreparationOp(op) || isAddressComputationOp(op) ||
+         isAlwaysSyntheticOp(op);
+}
+
+std::optional<Location> getUniqueStoreLoc(llvm::ArrayRef<Location> candidates) {
+  std::optional<Location> uniqueLoc;
+
+  for (Location candidate : candidates) {
+    Location canonicalLoc = canonicalizeSourceLoc(candidate);
+    if (!uniqueLoc) {
+      uniqueLoc = canonicalLoc;
+      continue;
+    }
+
+    if (*uniqueLoc != canonicalLoc)
+      return std::nullopt;
+  }
+
+  return uniqueLoc;
+}
+
+void collectUserVisibleStoreLocsForDestinationView(
+    Operation *view, llvm::SmallVectorImpl<Location> &candidates) {
+  if (!isDestinationViewOp(view) || view->getNumResults() != 1)
+    return;
+
+  SourceLine viewLine = getSourceLine(canonicalizeSourceLoc(view->getLoc()));
+  if (!viewLine)
+    return;
+
+  Value result = view->getResult(0);
+
+  for (Operation *user : result.getUsers()) {
+    if (!isUserVisibleStoreAnchorOp(user))
+      continue;
+
+    SourceLine userLine = getSourceLine(canonicalizeSourceLoc(user->getLoc()));
+
+    if (!userLine || userLine != viewLine)
+      continue;
+
+    for (OpOperand &operand : user->getOpOperands()) {
+      if (operand.get() != result)
+        continue;
+
+      // bufferization.materialize_in_destination:
+      //   operand #0 = source tensor/value
+      //   operand #1 = destination memref/view
+      if (operand.getOperandNumber() == 1)
+        candidates.push_back(user->getLoc());
+    }
+  }
+}
+
+void collectUserVisibleStoreLocsThroughDestinationView(
+    Operation *op, llvm::SmallVectorImpl<Location> &candidates) {
   if (op->getNumResults() != 1)
-    return std::nullopt;
+    return;
 
   Value result = op->getResult(0);
 
   for (Operation *viewUser : result.getUsers()) {
-    if (!isDestinationViewForUserVisibleStore(viewUser))
-      continue;
-
-    return getUserVisibleStoreLocForDestinationView(viewUser);
+    collectUserVisibleStoreLocsForDestinationView(viewUser, candidates);
   }
-
-  return std::nullopt;
 }
 
-std::optional<Location>
-getUserVisibleStoreLocThroughTensorInsert(Operation *op) {
+void collectUserVisibleStoreLocsThroughTensorInsert(
+    Operation *op, llvm::SmallVectorImpl<Location> &candidates) {
   if (op->getNumResults() != 1)
-    return std::nullopt;
+    return;
 
   Value result = op->getResult(0);
 
@@ -320,7 +341,7 @@ getUserVisibleStoreLocThroughTensorInsert(Operation *op) {
       SourceLine storeLine =
           getSourceLine(canonicalizeSourceLoc(storeUser->getLoc()));
 
-      if (!storeLine || !(storeLine == insertLine))
+      if (!storeLine || storeLine != insertLine)
         continue;
 
       for (OpOperand &operand : storeUser->getOpOperands()) {
@@ -331,12 +352,10 @@ getUserVisibleStoreLocThroughTensorInsert(Operation *op) {
         //   operand #0 = source tensor/value
         //   operand #1 = destination memref/view
         if (operand.getOperandNumber() == 0)
-          return canonicalizeSourceLoc(storeUser->getLoc());
+          candidates.push_back(storeUser->getLoc());
       }
     }
   }
-
-  return std::nullopt;
 }
 
 DebugLineLocClass
@@ -394,20 +413,6 @@ StringRef stringifyClass(DebugLineLocClass locClass) {
   llvm_unreachable("unknown debug line location class");
 }
 
-bool isReorderedBackwardStep(Operation *op, DebugLineLocClass locClass,
-                             SourceLine previousLine) {
-  if (locClass == DebugLineLocClass::Control || !previousLine)
-    return false;
-
-  SourceLine line = getSourceLine(canonicalizeSourceLoc(op->getLoc()));
-  if (!line || line.file != previousLine.file || line.line >= previousLine.line)
-    return false;
-
-  return isMaybeHelperConstant(op) || isArithmeticOrCastOp(op) ||
-         isValuePreparationOp(op) || isAddressComputationOp(op) ||
-         isAlwaysSyntheticOp(op);
-}
-
 Location makeSyntheticDebugLoc(Operation *op, Location originalLoc) {
   MLIRContext *context = op->getContext();
 
@@ -444,26 +449,19 @@ void markRetargetedSyntheticOp(Operation *op, Location originalLoc,
 }
 
 bool retargetSyntheticOpToStoreLoc(Operation *op, Location originalLoc) {
-  if (isAddressComputationOp(op) || isArithmeticOrCastOp(op)) {
-    if (std::optional<Location> storeLoc =
-            getUserVisibleStoreLocForDestinationView(op)) {
-      markRetargetedSyntheticOp(op, originalLoc, *storeLoc);
-      return true;
-    }
+  llvm::SmallVector<Location> candidates;
 
-    if (std::optional<Location> storeLoc =
-            getUserVisibleStoreLocThroughDestinationView(op)) {
-      markRetargetedSyntheticOp(op, originalLoc, *storeLoc);
-      return true;
-    }
+  if (isAddressComputationOp(op) || isArithmeticOrCastOp(op)) {
+    collectUserVisibleStoreLocsForDestinationView(op, candidates);
+    collectUserVisibleStoreLocsThroughDestinationView(op, candidates);
   }
 
-  if (isArithmeticOrCastOp(op)) {
-    if (std::optional<Location> storeLoc =
-            getUserVisibleStoreLocThroughTensorInsert(op)) {
-      markRetargetedSyntheticOp(op, originalLoc, *storeLoc);
-      return true;
-    }
+  if (isArithmeticOrCastOp(op))
+    collectUserVisibleStoreLocsThroughTensorInsert(op, candidates);
+
+  if (std::optional<Location> storeLoc = getUniqueStoreLoc(candidates)) {
+    markRetargetedSyntheticOp(op, originalLoc, *storeLoc);
+    return true;
   }
 
   return false;
