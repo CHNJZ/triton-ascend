@@ -142,10 +142,6 @@ bool isAlwaysSyntheticOp(Operation *op) {
       .Default(false);
 }
 
-bool isMaybeHelperConstant(Operation *op) {
-  return op->getName().getStringRef() == "arith.constant";
-}
-
 bool isTensorOnlyLinalgFillOp(Operation *op) {
   if (op->getName().getStringRef() != "linalg.fill")
     return false;
@@ -231,18 +227,19 @@ bool isAddressComputationOp(Operation *op) {
          name.contains("trunc");
 }
 
+// `previousLine` is the last seen source line of a semantic or control
+// operation. A semantic arithmetic operation that points to an earlier source
+// line was likely reordered by lowering, so treat it as synthetic.
 bool isReorderedBackwardStep(Operation *op, DebugLineLocClass locClass,
                              SourceLine previousLine) {
-  if (locClass == DebugLineLocClass::Control || !previousLine)
+  if (locClass != DebugLineLocClass::Semantic || !previousLine)
     return false;
 
   SourceLine line = getSourceLine(canonicalizeSourceLoc(op->getLoc()));
   if (!line || line.file != previousLine.file || line.line >= previousLine.line)
     return false;
 
-  return isMaybeHelperConstant(op) || isArithmeticOrCastOp(op) ||
-         isValuePreparationOp(op) || isAddressComputationOp(op) ||
-         isAlwaysSyntheticOp(op);
+  return isArithmeticOrCastOp(op);
 }
 
 std::optional<Location> getUniqueStoreLoc(llvm::ArrayRef<Location> candidates) {
@@ -379,15 +376,15 @@ classifyOperation(Operation *op,
   if (isRealMemoryOrCallOp(op))
     return DebugLineLocClass::Semantic;
 
-  SourceLine line = getSourceLine(canonicalizeSourceLoc(op->getLoc()));
-  bool hasSemanticAnchorOnSameLine =
-      line && semanticAnchors.lookup(line.getKey()) > 0;
-
   if (isValuePreparationOp(op))
     return DebugLineLocClass::Synthetic;
 
   if (isAddressComputationOp(op))
     return DebugLineLocClass::Synthetic;
+
+  SourceLine line = getSourceLine(canonicalizeSourceLoc(op->getLoc()));
+  bool hasSemanticAnchorOnSameLine =
+      line && semanticAnchors.lookup(line.getKey()) > 0;
 
   if (isArithmeticOrCastOp(op)) {
     if (hasSemanticAnchorOnSameLine)
