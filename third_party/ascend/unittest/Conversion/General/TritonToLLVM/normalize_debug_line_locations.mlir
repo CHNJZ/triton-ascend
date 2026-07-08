@@ -1,5 +1,13 @@
 // RUN: triton-opt %s -split-input-file --normalize-debug-line-locations --allow-unregistered-dialect --mlir-print-debuginfo | FileCheck %s
 
+//===----------------------------------------------------------------------===//
+// control_ops
+//
+// Verifies that control-flow operations remain user-visible debug anchors.
+// cf.br, scf.if, scf.for, and func.return must be classified as
+// "control" and must keep their original real source locations.
+//===----------------------------------------------------------------------===//
+
 module {
 func.func @control_ops(%cond: i1) {
 cf.br ^bb1 loc("control.py":2:3)
@@ -35,6 +43,16 @@ func.return loc("control.py":6:3)
 
 // -----
 
+//===----------------------------------------------------------------------===//
+// synthetic_glue
+//
+// Verifies the default handling of helper/glue operations that do not have a
+// unique user-visible store anchor. unrealized_conversion_cast and
+// memref.subview must be classified as "synthetic", preserve their original
+// location in triton.debug_line.origin, and move to glue.py:0:0. The
+// surrounding control operations must remain at their real source locations.
+//===----------------------------------------------------------------------===//
+
 module {
 func.func @synthetic_glue(%arg0: memref<8xf32>, %idx: index, %cond: i1) {
 %cast = builtin.unrealized_conversion_cast %idx : index to i64 loc("glue.py":2:5)
@@ -69,6 +87,17 @@ func.return loc("glue.py":5:3)
 // CHECK-DAG: #[[GLUE_RETURN_LOC]] = loc("glue.py":5:3)
 
 // -----
+
+//===----------------------------------------------------------------------===//
+// source_line_write_anchor
+//
+// Verifies the main write-anchor normalization case modeled after the loop
+// reordering problem. Address/view computations that uniquely feed a
+// user-visible store are retargeted to the store source location, while pure
+// value/tensor preparation remains synthetic and is moved to
+// loop_reordering.py:0:0. The test also covers NameLoc preservation for the
+// ticket load and retargeting through tensor.insert for the next-ticket store.
+//===----------------------------------------------------------------------===//
 
 module {
 func.func @source_line_write_anchor(%trace: memref<8xi32>, %counter: memref<1xi32>) {
@@ -159,6 +188,15 @@ func.return loc("loop_reordering.py":26:3)
 
 // -----
 
+//===----------------------------------------------------------------------===//
+// memref_fill_anchor
+//
+// Verifies that linalg.fill writing directly to a memref is treated as a real
+// semantic memory write anchor. The scalar constant used as the fill value is
+// synthetic and is moved to memfill.py:0:0, while the memref fill keeps its
+// user-visible source location.
+//===----------------------------------------------------------------------===//
+
 module {
 func.func @memref_fill_anchor(%dst: memref<4xf32>) {
 %cst = arith.constant 0.000000e+00 : f32 loc("memfill.py":3:5)
@@ -187,6 +225,15 @@ func.return loc("memfill.py":4:3)
 // CHECK-DAG: #[[MEMFILL_RETURN_LOC]] = loc("memfill.py":4:3)
 
 // -----
+
+//===----------------------------------------------------------------------===//
+// future_line_constant
+//
+// Verifies the backward-step heuristic and helper constant handling. Constants
+// and reordered arithmetic that would otherwise introduce misleading source
+// locations are classified as synthetic and moved to future.py:0:0, while the
+// real load and return keep their visible locations.
+//===----------------------------------------------------------------------===//
 
 module {
 func.func @future_line_constant(%arg0: memref<4xf32>) {
@@ -231,6 +278,15 @@ func.return loc("future.py":14:3)
 
 // -----
 
+//===----------------------------------------------------------------------===//
+// llvm_constant
+//
+// Verifies LLVM dialect helper constants. llvm.mlir.constant is classified as
+// synthetic, its original location is preserved in triton.debug_line.origin,
+// and the operation location is rewritten to llvm.py:0:0. llvm.return remains
+// a control operation at its real source location.
+//===----------------------------------------------------------------------===//
+
 module {
 llvm.func @llvm_constant() {
 %0 = llvm.mlir.constant(7 : i32) : i32 loc("llvm.py":20:5)
@@ -253,6 +309,16 @@ llvm.return loc("llvm.py":21:3)
 // CHECK-DAG: #[[LLVM_RETURN_LOC]] = loc("llvm.py":21:3)
 
 // -----
+
+//===----------------------------------------------------------------------===//
+// nameloc_is_source / fused_scope_is_preserved
+//
+// Verifies location canonicalization rules for semantic operations. A
+// non-internal NameLoc such as "trace_ptr" must be preserved as source-like
+// metadata. A fused location carrying an LLVM DIScope must also be preserved
+// intact, so already materialized debug-scope metadata is not stripped. Helper
+// constants in both functions still become synthetic zero-line operations.
+//===----------------------------------------------------------------------===//
 
 #di_file = #llvm.di_file<"scope.py" in "/tmp">
 #di_cu = #llvm.di_compile_unit<id = distinct[0]<>, sourceLanguage = DW_LANG_C, file = #di_file, producer = "triton", isOptimized = true, emissionKind = LineTablesOnly>
@@ -310,6 +376,15 @@ func.return loc("scope.py":8:3)
 
 // -----
 
+//===----------------------------------------------------------------------===//
+// shape_is_unchanged
+//
+// Verifies that the pass does not change IR semantics or structure. The test
+// captures function arguments, result types, operands, produced values, and the
+// returned value. Only operation locations and diagnostic debug-line
+// attributes are expected to change.
+//===----------------------------------------------------------------------===//
+
 module {
 func.func @shape_is_unchanged(%arg0: memref<8xf32>, %arg1: memref<8xf32>, %idx: index) -> i32 {
 %sub = memref.subview %arg0[%idx] [4] [1] : memref<8xf32> to memref<4xf32, strided<[1], offset: ?>> loc("shape.py":2:5)
@@ -358,6 +433,16 @@ return %r : i32 loc("shape.py":6:3)
 
 // -----
 
+//===----------------------------------------------------------------------===//
+// direct_destination_view_ambiguity
+//
+// Verifies deterministic behavior when one destination view has multiple
+// direct materialize_in_destination users with distinct store locations. The
+// view must not be retargeted based on getUsers() iteration order; it remains
+// synthetic and moves to direct_ambiguity.py:0:0, while each store keeps its
+// own semantic location.
+//===----------------------------------------------------------------------===//
+
 module {
 func.func @direct_destination_view_ambiguity(%src: tensor<4xf32>, %dst: memref<8xf32>, %idx: index) {
 %view = memref.subview %dst[%idx] [4] [1] : memref<8xf32> to memref<4xf32, strided<[1], offset: ?>> loc("direct_ambiguity.py":10:5)
@@ -386,6 +471,16 @@ func.return loc("direct_ambiguity.py":11:3)
 // CHECK-DAG: #[[DIRECT_STORE_1_LOC]] = loc("direct_ambiguity.py":10:30)
 
 // -----
+
+//===----------------------------------------------------------------------===//
+// through_destination_view_ambiguity
+//
+// Verifies deterministic behavior when one operation feeds multiple
+// destination views. The shared index_cast has two distinct store candidates
+// through different subviews, so it must remain synthetic instead of choosing
+// an arbitrary user. Each subview has a unique store and may be retargeted to
+// its own semantic store location.
+//===----------------------------------------------------------------------===//
 
 module {
 func.func @through_destination_view_ambiguity(%src: tensor<4xf32>, %dst0: memref<8xf32>, %dst1: memref<8xf32>, %offset: i32) {
@@ -418,6 +513,15 @@ func.return loc("through_view_ambiguity.py":23:3)
 
 // -----
 
+//===----------------------------------------------------------------------===//
+// through_tensor_insert_ambiguity
+//
+// Verifies deterministic behavior for the tensor.insert retargeting path. The
+// same arithmetic result is inserted into two tensors and reaches two distinct
+// stores. Because there is no unique canonical store location, the arithmetic
+// operation remains synthetic and moves to tensor_insert_ambiguity.py:0:0.
+//===----------------------------------------------------------------------===//
+
 module {
 func.func @through_tensor_insert_ambiguity(%lhs: f32, %rhs: f32, %base0: tensor<1xf32>, %base1: tensor<1xf32>, %dst0: memref<1xf32>, %dst1: memref<1xf32>, %idx: index) {
 %sum = arith.addf %lhs, %rhs : f32 loc("tensor_insert_ambiguity.py":30:5)
@@ -449,6 +553,16 @@ func.return loc("tensor_insert_ambiguity.py":31:3)
 
 // -----
 
+//===----------------------------------------------------------------------===//
+// duplicate_canonical_store_candidates
+//
+// Verifies that duplicate candidates with the same canonical source location
+// are treated as one unique store anchor. One store location is wrapped in an
+// internal NameLoc and the other is a direct FileLineColLoc, but both
+// canonicalize to duplicate_candidates.py:40:30, so the view can be safely
+// retargeted there.
+//===----------------------------------------------------------------------===//
+
 module {
 func.func @duplicate_canonical_store_candidates(%src: tensor<4xf32>, %dst: memref<8xf32>, %idx: index) {
 %view = memref.subview %dst[%idx] [4] [1] : memref<8xf32> to memref<4xf32, strided<[1], offset: ?>> loc("duplicate_candidates.py":40:5)
@@ -475,6 +589,16 @@ func.return loc("duplicate_candidates.py":41:3)
 // CHECK-DAG: #[[DUPLICATE_STORE_LOC]] = loc("duplicate_candidates.py":40:30)
 
 // -----
+
+//===----------------------------------------------------------------------===//
+// direct_and_nested_destination_view_ambiguity
+//
+// Verifies ambiguity detection across direct and nested destination-view
+// paths. The base view has several distinct possible store anchors, including
+// direct stores and a store through a nested subview. The pass must not select
+// one arbitrarily, so the base view remains synthetic and moves to
+// cross_view_ambiguity.py:0:0.
+//===----------------------------------------------------------------------===//
 
 module {
 func.func @direct_and_nested_destination_view_ambiguity(%src: tensor<4xf32>, %dst: memref<8xf32>, %idx: index) {
@@ -509,6 +633,16 @@ func.return loc("cross_view_ambiguity.py":52:3)
 
 // -----
 
+//===----------------------------------------------------------------------===//
+// destination_view_and_tensor_insert_ambiguity
+//
+// Verifies ambiguity detection across different retargeting mechanisms. The
+// same index_cast feeds both a destination-view store path and a tensor.insert
+// store path, and the two paths resolve to different store locations. Since the
+// combined candidate set is not unique, the index_cast remains synthetic and
+// moves to cross_path_ambiguity.py:0:0.
+//===----------------------------------------------------------------------===//
+
 module {
 func.func @destination_view_and_tensor_insert_ambiguity(%offset: i32, %src: tensor<1xindex>, %base: tensor<1xindex>, %dst0: memref<4xindex>, %dst1: memref<1xindex>) {
 %c0 = arith.constant 0 : index loc("cross_path_ambiguity.py":60:3)
@@ -540,6 +674,16 @@ func.return loc("cross_path_ambiguity.py":63:3)
 // CHECK-DAG: #[[CROSS_PATH_STORE_B]] = loc("cross_path_ambiguity.py":62:20)
 
 // -----
+
+//===----------------------------------------------------------------------===//
+// matching_destination_view_and_tensor_insert_candidates
+//
+// Verifies the positive cross-path case. The same index_cast feeds both a
+// destination-view store path and a tensor.insert store path, but all collected
+// candidates canonicalize to cross_path_unique.py:71:20. Because there is
+// exactly one distinct canonical store location, the index_cast is classified
+// as semantic and retargeted to that store anchor.
+//===----------------------------------------------------------------------===//
 
 module {
 func.func @matching_destination_view_and_tensor_insert_candidates(%offset: i32, %src: tensor<1xindex>, %base: tensor<1xindex>, %dst0: memref<4xindex>, %dst1: memref<1xindex>) {
