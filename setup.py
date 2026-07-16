@@ -42,6 +42,8 @@ except ImportError:
     class editable_wheel:
         pass
 
+import ssl
+ssl._create_default_https_context = ssl._create_unverified_context
 
 sys.path.insert(0, os.path.dirname(__file__))
 
@@ -541,6 +543,20 @@ class CMakeBuild(build_ext):
         if roctracer_include_dir == "":
             roctracer_include_dir = os.path.join(get_base_dir(), "third_party", "amd", "backend", "include")
         cmake_args += ["-DROCTRACER_INCLUDE_DIR=" + roctracer_include_dir]
+        mspti_include_dir = get_env_with_keys(["MSPTI_INCLUDE_DIR"])
+        if mspti_include_dir == "":
+            cann_home = os.getenv("ASCEND_TOOLKIT_HOME", "")
+            if cann_home:
+                mspti_include_dir = os.path.join(cann_home, "tools", "mspti", "include")
+        if mspti_include_dir != "":
+            cmake_args += ["-DMSPTI_INCLUDE_DIR=" + mspti_include_dir]
+        mspti_lib_dir = get_env_with_keys(["MSPTI_LIB_DIR"])
+        if mspti_lib_dir == "":
+            cann_home = os.getenv("ASCEND_TOOLKIT_HOME", "")
+            if cann_home:
+                mspti_lib_dir = os.path.join(cann_home, "tools", "mspti", "lib64")
+        if mspti_lib_dir != "":
+            cmake_args += ["-DMSPTI_LIB_DIR=" + mspti_lib_dir]
         return cmake_args
 
     def build_extension(self, ext):
