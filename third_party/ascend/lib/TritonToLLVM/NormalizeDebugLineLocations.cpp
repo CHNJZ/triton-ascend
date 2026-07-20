@@ -130,7 +130,7 @@ bool isControlOp(Operation *op) {
 bool isAlwaysSyntheticOp(Operation *op) {
   StringRef name = op->getName().getStringRef();
   // Do not classify memref.copy as always synthetic. In TTIR-to-TTAdapter
-  // lowering, a user-visible tt.load may become a memref.copy-based sequence.
+  // lowering, a user-visible `tt.load` may become a memref.copy-based sequence.
   // Keeping memref.copy source locations preserves stable DWARF anchors for
   // load lines that otherwise may disappear from the final line table.
   return llvm::StringSwitch<bool>(name)
