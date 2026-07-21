@@ -591,8 +591,10 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             _compile_option_list += ["--disable-ffts"]
         if _is_ascend_sanitizer_enabled():
             _compile_option_list += ["--enable-sanitizer=true"]
-        if not _is_debug_line_info_disabled():
+        if not _is_debug_line_info_disabled() or _enable_msdebug():
             _compile_option_list += ["--enable-debug-info=true"]
+        if _enable_msdebug():
+            _compile_option_list += ["--enable-ms-debug=true"]
 
         if _enable_print_ub_bits():
             _compile_option_list += ["--enable-print-memory-allocated-size"]
@@ -832,7 +834,7 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
 
         if _is_ascend_sanitizer_enabled():
             _compile_option_list += ["--enable-sanitizer=true"]
-        if not _is_debug_line_info_disabled():
+        if not _is_debug_line_info_disabled() or _enable_msdebug():
             _compile_option_list += ["--enable-debug-info=true"]
 
         if _enable_print_ub_bits():
