@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Dict, Optional, Tuple, Union
+from .debug_line_rewriter import rewrite_debug_line
 
 from triton._C.libtriton import ir, passes, ascend
 from triton.backends.ascend.utils import (
@@ -127,6 +128,19 @@ def _get_dump_paths(hash_key: str, src_path: str, dst_path: str) -> Tuple[str, s
         dump_dir = os.path.join(dump_dir_env, _base32(hash_key))
         return (os.path.join(dump_dir, os.path.basename(src_path)), os.path.join(dump_dir, os.path.basename(dst_path)))
     return (src_path, dst_path)
+
+
+def _with_debug_line(npubin_stage, options):
+    """Wrap an npubin-producing stage so the emitted kernel binary gets
+    .debug_line cleanup for msdebug stepping. No-op unless
+    LLVM_EXTRACT_DI_LOCAL_VARIABLES is set; never raises (failure returns the
+    artifact unchanged), so it cannot break a build."""
+
+    def stage(src, metadata):
+        artifact = npubin_stage(src, metadata)
+        return rewrite_debug_line(artifact, metadata=metadata, options=options)
+
+    return stage
 
 
 def make_ttir(mod, metadata, opt):
@@ -1265,6 +1279,7 @@ class AscendBackend(BaseBackend):
             else:
                 stages["npubin"] = (
                     lambda src, metadata: linalg_to_bin_enable_npu_compile_A2_A3(src, metadata, options))
+            stages["npubin"] = _with_debug_line(stages["npubin"], options)
         else:
             raise NotImplementedError(f"Backend '{self.target.backend}' is not supported. "
                                       "Please ensure the target backend is set to 'npu'.")
