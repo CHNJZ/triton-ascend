@@ -225,6 +225,9 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
             ascend.passes.ttir.set_enable_buffer_insert_optimization(mod, metadata["enable_buffer_insert_optimization"])
             ascend.passes.ttir.add_dynamic_cv_pipeline(pm, compile_on_910_95)
 
+        if _enable_msdebug():
+            ascend.passes.ttir.add_normalize_debug_line_locations(pm)
+
         _intra_val = metadata.get("intra_cache_num")
         if _intra_val is not None:
             ascend.passes.ttir.set_buffer_count(mod, "INTRA", _intra_val)
