@@ -535,6 +535,7 @@ def get_ascend_arch_from_env():
         "Ascend910B3",
         "Ascend910B4",
         "Ascend910_9362",
+        "Ascend910_9363",
         "Ascend910_9372",
         "Ascend910_9381",
         "Ascend910_9382",
