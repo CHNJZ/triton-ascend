@@ -78,10 +78,30 @@ void insertDebugNop(Location loc, PatternRewriter &rewriter) {
       LLVM::AsmDialectAttr::get(ctx, LLVM::AsmDialect::AD_ATT), ArrayAttr());
 }
 void insertDebugNopForMask(mlir::Value mask, mlir::PatternRewriter &rewriter) {
-  if (!mask)
+  if (!mask || !mlir::triton::debug::isMsdebugEnabled())
     return;
-  if (mlir::Operation *def = mask.getDefiningOp())
-    insertDebugNop(unwrapFusedLocForDebug(def->getLoc()), rewriter);
+  
+  mlir::Operation *def = mask.getDefiningOp();
+  if (!def)
+    return;
+
+  mlir::Location maskLoc = unwrapFusedLocForDebug(def->getLoc());
+
+  // insertDebugNopForMask may be called by multiple loads/stores that share the
+  // same mask. Avoid inserting the same mask anchor more than once.
+  if (mlir::Operation *next = def->getNextNode()) {
+    if (mlir::triton::debug::isDebugNop(next) &&
+        unwrapFusedLocForDebug(next->getLoc()) == maskLoc) {
+      return;
+    }
+  }
+
+  // The mask may be defined outside the load/store's current region.
+  // Insert the anchor next to the mask definition rather than at the current
+  // Load/Store conversion insertion point.
+  mlir::OpBuilder::InsertionGuard guard(rewriter);
+  rewriter.setInsertionPointAfter(def);
+  insertDebugNop(maskLoc, rewriter);
 }
 static void
 collectUserLineLocs(Location loc,
