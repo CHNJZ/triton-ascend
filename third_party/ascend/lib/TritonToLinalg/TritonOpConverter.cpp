@@ -186,14 +186,19 @@ LogicalResult MakeTensorPtrConverter::matchAndRewrite(
 LogicalResult PreciseDivConverter::matchAndRewrite(
     triton::PreciseDivFOp op, OpAdaptor adaptor,
     ConversionPatternRewriter &rewriter) const {
-  Value opa = op.getX();
-  Value opb = op.getY();
+  Value opa = adaptor.getX();
+  Value opb = adaptor.getY();
   auto loc = op.getLoc();
 
-  auto resType = dyn_cast<RankedTensorType>(op.getResult().getType());
-  auto divOp = rewriter.create<arith::DivFOp>(loc, resType, opa, opb);
+  if (opa.getType() != opb.getType())
+    return rewriter.notifyMatchFailure(op, "operands must have the same type");
 
-  rewriter.replaceOp(op, divOp);
+  // Let DivFOp infer its result type from converted operands.  PreciseDivFOp
+  // is valid for both scalar and tensor floating-point values; casting the
+  // original result to RankedTensorType made scalar divisions produce a null
+  // result type during partial conversion.
+  auto divOp = rewriter.create<arith::DivFOp>(loc, opa, opb);
+  rewriter.replaceOp(op, divOp.getResult());
   return success();
 }
 
@@ -1715,13 +1720,13 @@ LogicalResult ExternElementwiseClOpConverter::matchAndRewrite(
     }
 
     // extern libdevice ops -> hivm.hir.custom
-    static constexpr llvm::StringLiteral simtLibdeviceSuffixes[] = {
+    static constexpr llvm::StringLiteral libdeviceSuffixes[] = {
         "_fp32", "_fp16", "_bf16", "_i32", "_i64", "_u32", "_u64"};
-    bool isSimtLibdeviceOp =
-        llvm::any_of(simtLibdeviceSuffixes, [&](llvm::StringRef suffix) {
+    bool isLibdeviceOp =
+        llvm::any_of(libdeviceSuffixes, [&](llvm::StringRef suffix) {
           return op.getSymbol().ends_with(suffix);
         });
-    if (isSimtLibdeviceOp) {
+    if (isLibdeviceOp) {
       auto originalTensorType = isDstScalar
                                     ? RankedTensorType::get({1}, dstElemTy)
                                     : cast<RankedTensorType>(dstTy);
@@ -1829,6 +1834,7 @@ LogicalResult ExternElementwiseClOpConverter::matchAndRewrite(
       customOp->setAttr("symbol",
                         mlir::StringAttr::get(customOp->getContext(), sym));
       customOp->setAttr("arg_attrs", argAttrsArray);
+      customOp.setInlineMode(hivm::InlineMode::AlwaysInline);
 
       // Restore the result's shape and element type
       Value finalResult = customOp.getResults().front();
@@ -2178,12 +2184,13 @@ LogicalResult DeviceAssertConverter::matchAndRewrite(
     triton::AssertOp op, OpAdaptor adaptor,
     mlir::ConversionPatternRewriter &rewriter) const {
   auto msgAttr = op.getMessageAttr();
-  // The frontend marks only sanitize_overflow assertions.  A user may choose
-  // the same text for tl.device_assert, so message matching is not a safe
-  // provenance test here or in the graph rewrite.
-  if (op->hasAttr("tt.auto_overflow_assert")) {
-    rewriter.eraseOp(op);
-    return success();
+  // Filter out automatically inserted assert ops
+  if (auto strAttr = mlir::dyn_cast<mlir::StringAttr>(msgAttr)) {
+    llvm::StringRef msg = strAttr.getValue();
+    if (msg.contains("overflow detected for operation")) {
+      rewriter.eraseOp(op);
+      return success();
+    }
   }
 
   auto moduleOp = op->getParentOfType<ModuleOp>();
