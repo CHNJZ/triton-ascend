@@ -24,6 +24,7 @@
 #include "Utils/Utils.h"
 #include "ascend/include/DiscreteMaskAccessConversion/Passes.h"
 
+#include "ascend/include/TritonToLinalg/LoadStoreConverter.h"
 #include "ascend/include/TritonToLinalg/MaskAnalysis.h"
 #include "ascend/include/TritonToStructured/MemOpConverter.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
@@ -464,6 +465,20 @@ void DiscreteMaskAccessConversionPass::runOnOperation() {
   bool tileNonOverlap = checkAllProgramIdNonOverlap(getOperation());
   enableSyncBlockLockFlag = !tileNonOverlap;
   auto moduleOp = getOperation();
+
+  // Restore floating-point atomic max/min expanded by semantic.py before
+  // discrete-mask rewriting changes the atomic value into arith.select.
+  // Run this in a separate greedy-rewrite phase so that
+  // DiscreteMaskAtomicConversion cannot consume the expanded form first.
+  RewritePatternSet atomicMaxMinPatterns(&getContext());
+  atomicMaxMinPatterns.add<LoadStoreConverter::AtomicMaxMinCanonicalizer>(
+      atomicMaxMinPatterns.getContext());
+  if (failed(
+          applyPatternsGreedily(moduleOp, std::move(atomicMaxMinPatterns)))) {
+    moduleOp->emitError("failed to canonicalize floating-point atomic max/min");
+    signalPassFailure();
+    return;
+  }
 
   RewritePatternSet patterns(&getContext());
   patterns.add<DiscreteMaskLoadConversion, DiscreteMaskStoreConversion,
