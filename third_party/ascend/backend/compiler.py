@@ -659,7 +659,8 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             _compile_option_list += ["--enable-sanitizer=true"]
         if not _is_debug_line_info_disabled():
             _compile_option_list += ["--enable-debug-info=true"]
-
+        if _enable_msdebug():
+            _compile_option_list += ["--enable-debug-variables=true"]
         if _enable_print_ub_bits():
             _compile_option_list += ["--enable-print-memory-allocated-size"]
 
@@ -917,7 +918,7 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
             _compile_option_list += ["--enable-memory-display=true"]
 
         if _enable_msdebug():
-            _compile_option_list += ["--enable-ms-debug=true"]
+            _compile_option_list += ["--enable-debug-variables=true"]
 
         enable_hivm_auto_cv_balance = metadata["enable_hivm_auto_cv_balance"]
         if enable_hivm_auto_cv_balance is not None:
