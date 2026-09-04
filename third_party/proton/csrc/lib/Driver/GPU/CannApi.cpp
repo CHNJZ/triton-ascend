@@ -43,8 +43,7 @@ void *getHalLibrary() {
 
 void *getDsmiLibrary() {
   (void)getHalLibrary();
-  static void *library =
-      dlopen("libdrvdsmi_host.so", RTLD_LOCAL | RTLD_LAZY);
+  static void *library = dlopen("libdrvdsmi_host.so", RTLD_LOCAL | RTLD_LAZY);
   return library;
 }
 
@@ -59,8 +58,7 @@ uint64_t parseUnsigned(const char *value) {
 
 std::string getSocName() {
   using GetSocNameFn = const char *(*)();
-  auto getSocName =
-      getSymbol<GetSocNameFn>(getAclLibrary(), "aclrtGetSocName");
+  auto getSocName = getSymbol<GetSocNameFn>(getAclLibrary(), "aclrtGetSocName");
   if (getSocName == nullptr)
     return "ascend";
   const char *socName = getSocName();
@@ -68,11 +66,11 @@ std::string getSocName() {
 }
 
 uint64_t getVectorCoreCount(uint64_t index) {
-  using GetDeviceInfoFn =
-      aclError (*)(uint32_t, aclrtDevAttr, int64_t *);
+  using GetDeviceInfoFn = aclError (*)(uint32_t, aclrtDevAttr, int64_t *);
   auto getDeviceInfo =
       getSymbol<GetDeviceInfoFn>(getAclLibrary(), "aclrtGetDeviceInfo");
-  if (getDeviceInfo != nullptr && index <= std::numeric_limits<uint32_t>::max()) {
+  if (getDeviceInfo != nullptr &&
+      index <= std::numeric_limits<uint32_t>::max()) {
     int64_t value = 0;
     auto result = getDeviceInfo(static_cast<uint32_t>(index),
                                 ACL_DEV_ATTR_VECTOR_CORE_NUM, &value);
@@ -86,10 +84,9 @@ uint64_t getVectorCoreCount(uint64_t index) {
   }
 
 #ifdef PROTON_HAS_ACL_PLATFORM
-  using GetPlatformInfoFn =
-      aclError (*)(aclplatformDevInfo, char *, uint32_t);
-  auto getPlatformInfo = getSymbol<GetPlatformInfoFn>(
-      getAclLibrary(), "aclplatformGetDeviceInfo");
+  using GetPlatformInfoFn = aclError (*)(aclplatformDevInfo, char *, uint32_t);
+  auto getPlatformInfo =
+      getSymbol<GetPlatformInfoFn>(getAclLibrary(), "aclplatformGetDeviceInfo");
   if (getPlatformInfo != nullptr) {
     char value[64]{};
     auto result = getPlatformInfo(ACL_PLATFORM_VECTOR_CORE_CNT, value,
@@ -103,10 +100,9 @@ uint64_t getVectorCoreCount(uint64_t index) {
 
 uint64_t getVectorClockRate() {
 #ifdef PROTON_HAS_ACL_PLATFORM
-  using GetPlatformInfoFn =
-      aclError (*)(aclplatformDevInfo, char *, uint32_t);
-  auto getPlatformInfo = getSymbol<GetPlatformInfoFn>(
-      getAclLibrary(), "aclplatformGetDeviceInfo");
+  using GetPlatformInfoFn = aclError (*)(aclplatformDevInfo, char *, uint32_t);
+  auto getPlatformInfo =
+      getSymbol<GetPlatformInfoFn>(getAclLibrary(), "aclplatformGetDeviceInfo");
   if (getPlatformInfo != nullptr) {
     char value[64]{};
     auto result = getPlatformInfo(ACL_PLATFORM_VEC_FREQ, value,
@@ -124,8 +120,8 @@ uint64_t getVectorClockRate(uint64_t index) {
     return clockRate;
 
   using HalGetDeviceInfoFn = int (*)(uint32_t, int32_t, int32_t, int64_t *);
-  auto getDeviceInfo = getSymbol<HalGetDeviceInfoFn>(
-      getHalLibrary(), "halGetDeviceInfo");
+  auto getDeviceInfo =
+      getSymbol<HalGetDeviceInfoFn>(getHalLibrary(), "halGetDeviceInfo");
   if (getDeviceInfo == nullptr ||
       index > static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()))
     return 0;
@@ -133,9 +129,9 @@ uint64_t getVectorClockRate(uint64_t index) {
   constexpr int32_t moduleTypeVectorCore = 7;
   constexpr int32_t infoTypeFrequency = 4;
   int64_t frequencyMHz = 0;
-  auto result = getDeviceInfo(static_cast<uint32_t>(index),
-                              moduleTypeVectorCore, infoTypeFrequency,
-                              &frequencyMHz);
+  auto result =
+      getDeviceInfo(static_cast<uint32_t>(index), moduleTypeVectorCore,
+                    infoTypeFrequency, &frequencyMHz);
   return result == 0 && frequencyMHz > 0
              ? static_cast<uint64_t>(frequencyMHz) * MHzToKHz
              : 0;
@@ -153,8 +149,8 @@ uint64_t getHbmClockRate(uint64_t index) {
   constexpr int dsmiDeviceTypeHbm = 2;
   for (auto memoryType : {dsmiDeviceTypeHbm, dsmiDeviceTypeDdr}) {
     unsigned int frequencyMHz = 0;
-    auto result = getDeviceFrequency(static_cast<int>(index), memoryType,
-                                     &frequencyMHz);
+    auto result =
+        getDeviceFrequency(static_cast<int>(index), memoryType, &frequencyMHz);
     if (result == 0 && frequencyMHz > 0)
       return static_cast<uint64_t>(frequencyMHz) * MHzToKHz;
   }

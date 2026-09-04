@@ -27,10 +27,10 @@ def test_ascend_proton_smoke():
     n_elements = 4096
     iterations = 5
     block_size = 256
-    grid = (triton.cdiv(n_elements, block_size),)
+    grid = (triton.cdiv(n_elements, block_size), )
 
     x = torch.arange(n_elements, device="npu", dtype=torch.float32)
-    y = torch.full((n_elements,), 2.0, device="npu", dtype=torch.float32)
+    y = torch.full((n_elements, ), 2.0, device="npu", dtype=torch.float32)
     output = torch.empty_like(x)
 
     # Compile before profiling so the profile contains execution rather than JIT setup.
@@ -58,11 +58,7 @@ def test_ascend_proton_smoke():
     with profile_path.open(encoding="utf-8") as profile_file:
         profile = json.load(profile_file)
 
-    kernel_nodes = [
-        node
-        for node in walk_profile(profile)
-        if node.get("frame", {}).get("name") == "vector_add_kernel"
-    ]
+    kernel_nodes = [node for node in walk_profile(profile) if node.get("frame", {}).get("name") == "vector_add_kernel"]
     if len(kernel_nodes) != 1:
         raise AssertionError(f"Unexpected kernel nodes: {kernel_nodes}")
 
@@ -95,10 +91,8 @@ def test_ascend_proton_smoke():
 
     print(f"target={triton.runtime.driver.active.get_current_target()}")
     print(f"result=ok, profile={profile_path}")
-    print(
-        f"kernel=vector_add_kernel, count={metrics['count']}, "
-        f"time_ns={metrics['time (ns)']}"
-    )
+    print(f"kernel=vector_add_kernel, count={metrics['count']}, "
+          f"time_ns={metrics['time (ns)']}")
     print(f"device={device_id}, info={device_info}")
 
 

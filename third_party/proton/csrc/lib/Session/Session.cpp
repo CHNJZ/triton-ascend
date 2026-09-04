@@ -4,8 +4,8 @@
 #include "Data/TraceData.h"
 #include "Data/TreeData.h"
 #include "Profiler/Cupti/CuptiProfiler.h"
-#include "Profiler/Mspti/MsptiProfiler.h"
 #include "Profiler/Instrumentation/InstrumentationProfiler.h"
+#include "Profiler/Mspti/MsptiProfiler.h"
 #include "Profiler/Roctracer/RoctracerProfiler.h"
 #include "Utility/String.h"
 

@@ -39,20 +39,17 @@ convertActivityToMetric(const msptiActivityKernel *kernel) {
   if (kernel->start >= kernel->end)
     return nullptr;
   return std::make_shared<KernelMetric>(
-      static_cast<uint64_t>(kernel->start),
-      static_cast<uint64_t>(kernel->end),
-      /*invocations=*/1,
-      static_cast<uint64_t>(kernel->ds.deviceId),
+      static_cast<uint64_t>(kernel->start), static_cast<uint64_t>(kernel->end),
+      /*invocations=*/1, static_cast<uint64_t>(kernel->ds.deviceId),
       static_cast<uint64_t>(DeviceType::NPU),
       static_cast<uint64_t>(kernel->ds.streamId));
 }
 
-void processActivityKernel(
-    MsptiProfiler::CorrIdToExternIdMap &corrIdToExternId,
-    MsptiProfiler::ApiExternIdSet &apiExternIds,
-    std::set<Data *> &dataSet,
-    const msptiActivityKernel *kernel,
-    uint64_t &outMaxCorrId) {
+void processActivityKernel(MsptiProfiler::CorrIdToExternIdMap &corrIdToExternId,
+                           MsptiProfiler::ApiExternIdSet &apiExternIds,
+                           std::set<Data *> &dataSet,
+                           const msptiActivityKernel *kernel,
+                           uint64_t &outMaxCorrId) {
 
   auto corrId = kernel->correlationId;
   if (corrId > outMaxCorrId)
@@ -77,17 +74,16 @@ void processActivityKernel(
     corrIdToExternId[corrId].second = numInstances;
 
   auto pending = pendingKernelActivities.load(std::memory_order_relaxed);
-  while (pending != 0 &&
-         !pendingKernelActivities.compare_exchange_weak(
-             pending, pending - 1, std::memory_order_relaxed)) {
+  while (pending != 0 && !pendingKernelActivities.compare_exchange_weak(
+                             pending, pending - 1, std::memory_order_relaxed)) {
   }
 }
 
 bool isDriverAPILaunch(msptiCallbackId cbId) {
-  return cbId == MSPTI_CBID_RUNTIME_LAUNCH        ||
-         cbId == MSPTI_CBID_RUNTIME_AICPU_LAUNCH  ||
-         cbId == MSPTI_CBID_RUNTIME_AIV_LAUNCH    ||
-         cbId == MSPTI_CBID_RUNTIME_FFTS_LAUNCH   ||
+  return cbId == MSPTI_CBID_RUNTIME_LAUNCH ||
+         cbId == MSPTI_CBID_RUNTIME_AICPU_LAUNCH ||
+         cbId == MSPTI_CBID_RUNTIME_AIV_LAUNCH ||
+         cbId == MSPTI_CBID_RUNTIME_FFTS_LAUNCH ||
          cbId == MSPTI_CBID_RUNTIME_CPU_LAUNCH;
 }
 
@@ -152,7 +148,8 @@ void MsptiProfiler::MsptiProfilerPimpl::completeBuffer(uint8_t *buffer,
   msptiActivity *record = nullptr;
   std::vector<const msptiActivityKernel *> kernelRecords;
   do {
-    auto status = mspti::activityGetNextRecord<false>(buffer, validSize, &record);
+    auto status =
+        mspti::activityGetNextRecord<false>(buffer, validSize, &record);
     if (status == MSPTI_SUCCESS) {
       if (record->kind == MSPTI_ACTIVITY_KIND_KERNEL) {
         auto *kernel = reinterpret_cast<const msptiActivityKernel *>(record);
@@ -160,8 +157,7 @@ void MsptiProfiler::MsptiProfilerPimpl::completeBuffer(uint8_t *buffer,
       } else if (record->kind == MSPTI_ACTIVITY_KIND_EXTERNAL_CORRELATION) {
         auto *external =
             reinterpret_cast<const msptiActivityExternalCorrelation *>(record);
-        if (external->externalKind ==
-            MSPTI_EXTERNAL_CORRELATION_KIND_CUSTOM0) {
+        if (external->externalKind == MSPTI_EXTERNAL_CORRELATION_KIND_CUSTOM0) {
           profiler.correlation.corrIdToExternId[external->correlationId] = {
               static_cast<size_t>(external->externalId), 1};
         }
@@ -277,12 +273,11 @@ void MsptiProfiler::stopOp(const Scope &scope) {
   GPUProfiler<MsptiProfiler>::stopOp(scope);
 }
 
-void MsptiProfiler::doSetMode(
-    const std::vector<std::string> &modeAndOptions) {
+void MsptiProfiler::doSetMode(const std::vector<std::string> &modeAndOptions) {
   auto mode = modeAndOptions[0];
   if (!mode.empty()) {
-    throw std::invalid_argument(
-        "[PROTON] MsptiProfiler: unsupported mode: " + mode);
+    throw std::invalid_argument("[PROTON] MsptiProfiler: unsupported mode: " +
+                                mode);
   }
 }
 

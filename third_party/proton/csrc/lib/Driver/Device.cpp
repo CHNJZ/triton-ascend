@@ -1,7 +1,7 @@
 #include "Device.h"
+#include "Driver/GPU/CannApi.h"
 #include "Driver/GPU/CudaApi.h"
 #include "Driver/GPU/HipApi.h"
-#include "Driver/GPU/CannApi.h"
 
 #include "Utility/Errors.h"
 
@@ -25,7 +25,7 @@ const std::string getDeviceTypeString(DeviceType type) {
     return DeviceTraits<DeviceType::CUDA>::name;
   } else if (type == DeviceType::HIP) {
     return DeviceTraits<DeviceType::HIP>::name;
-  } else if (type == DeviceType::NPU){
+  } else if (type == DeviceType::NPU) {
     return DeviceTraits<DeviceType::NPU>::name;
   }
   throw std::runtime_error("DeviceType not supported");
