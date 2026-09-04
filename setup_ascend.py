@@ -353,6 +353,15 @@ def _patch_module(mod):
                 or os.getenv("ASCEND_HOME_PATH", "")
             )
 
+            cann_include_dir = os.getenv("CANN_INCLUDE_DIR", "")
+            if not cann_include_dir and cann_home:
+                cann_include_dir = os.path.join(cann_home, "include")
+
+            if cann_include_dir:
+                cmake_args.append(
+                    f"-DCANN_INCLUDE_DIR={cann_include_dir}"
+                )
+
             mspti_include_dir = os.getenv("MSPTI_INCLUDE_DIR", "")
             if not mspti_include_dir and cann_home:
                 mspti_include_dir = os.path.join(

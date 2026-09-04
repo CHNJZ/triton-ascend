@@ -72,12 +72,34 @@ def test_ascend_proton_smoke():
     if metrics.get("time (ns)", 0) <= 0:
         raise AssertionError(f"Proton profile contains no kernel timing: {metrics}")
 
+    device_id = str(metrics.get("device_id"))
+    device_info = profile[1].get("NPU", {}).get(device_id)
+    if device_info is None:
+        raise AssertionError(f"Proton profile contains no NPU {device_id} information")
+
+    expected_device_fields = {
+        "arch",
+        "bus_width",
+        "clock_rate",
+        "memory_clock_rate",
+        "num_sms",
+    }
+    missing_fields = expected_device_fields.difference(device_info)
+    if missing_fields:
+        raise AssertionError(f"Missing device information: {sorted(missing_fields)}")
+    if device_info["arch"] in ("", "ascend"):
+        raise AssertionError(f"Unexpected NPU architecture: {device_info}")
+    for field in ("clock_rate", "memory_clock_rate", "num_sms"):
+        if device_info[field] <= 0:
+            raise AssertionError(f"Invalid {field}: {device_info}")
+
     print(f"target={triton.runtime.driver.active.get_current_target()}")
     print(f"result=ok, profile={profile_path}")
     print(
         f"kernel=vector_add_kernel, count={metrics['count']}, "
         f"time_ns={metrics['time (ns)']}"
     )
+    print(f"device={device_id}, info={device_info}")
 
 
 if __name__ == "__main__":
