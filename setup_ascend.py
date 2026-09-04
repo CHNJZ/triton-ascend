@@ -313,6 +313,10 @@ def _get_install_requirements():
         "pyelftools>=0.29",
         "triton==3.6.0",
     ]
+    if os.getenv("TRITON_BUILD_PROTON", "ON").lower() not in (
+        "0", "false", "off", "no"
+    ):
+        install_requires.append("llnl-hatchet")
     return [*install_requires]
 
 

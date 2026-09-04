@@ -20,6 +20,25 @@ To **not build** Proton, you can set the `TRITON_BUILD_PROTON` environment varia
 TRITON_BUILD_PROTON=OFF pip install .
 ```
 
+### Ascend build and viewer dependencies
+
+Build and install Triton Ascend with Proton enabled from the repository root:
+
+```bash
+TRITON_BUILD_PROTON=ON python3 setup_ascend.py install
+```
+
+This installs the `proton-viewer` entry point and its `llnl-hatchet`
+dependency. For an existing Proton build, the viewer dependency can also be
+installed separately:
+
+```bash
+python3 -m pip install "pandas<3" llnl-hatchet
+```
+
+`llnl-hatchet` provides the profile tree reader and brings in the remaining
+Python dependencies. It currently requires `pandas<3`.
+
 ## Usage
 
 ### Basic usage
@@ -52,6 +71,38 @@ proton.activate(session_id)
 # Write out the profile data and finalize the profiler
 proton.finalize()
 ```
+
+### Ascend MSPTI setup
+
+Preloading MSPTI is a required setup step for every Python process that
+collects an Ascend profile. `LD_PRELOAD` must be set before Python starts:
+
+```bash
+export ASCEND_HOME_PATH=${ASCEND_HOME_PATH:-/usr/local/Ascend/ascend-toolkit/latest}
+export LD_PRELOAD="$ASCEND_HOME_PATH/tools/mspti/lib64/libmspti.so${LD_PRELOAD:+:$LD_PRELOAD}"
+python your_script.py
+```
+
+A minimal profiling region is:
+
+```python
+import triton.profiler as proton
+
+session = proton.start("ascend_profile", backend="mspti", hook="triton")
+try:
+    with proton.scope("region"):
+        kernel[grid](...)
+finally:
+    proton.finalize(session)
+```
+
+The `backend` argument may be omitted when the active runtime is Ascend;
+Proton then selects MSPTI automatically. `deactivate(session)` and
+`activate(session)` can be used to skip and resume collection within the same
+session.
+
+`proton-viewer` only parses the generated `.hatchet` file. It does not require
+an NPU, CANN, MSPTI, or `LD_PRELOAD`.
 
 ### Scope
 
@@ -93,13 +144,14 @@ NVTX pushes and pops (for example, `torch.cuda.nvtx.range_push`) appear as neste
 
 ### Backend and mode
 
-Proton supports three profiling backends: `cupti`, `roctracer`, and `instrumentation`.
+Proton supports four profiling backends: `cupti`, `roctracer`, `mspti`, and `instrumentation`.
 
 - **`cupti`**: Used for NVIDIA GPUs. It supports both the default profiling mode and `pcsampling` (instruction sampling).
 - **`roctracer`**: Used for AMD GPUs. It supports only the default profiling mode.
+- **`mspti`**: Used for Ascend NPUs. It supports kernel activity collection.
 - **`instrumentation`**: Available on both NVIDIA and AMD GPUs, this backend enables collection of custom metrics and advanced instrumentation.
 
-By default, Proton automatically selects either `cupti` or `roctracer` as the backend based on your GPU driver. The `instrumentation` backend offers a wide range of mode options for fine-grained profiling, as detailed in the `mode.py` file.
+By default, Proton automatically selects `cupti`, `roctracer`, or `mspti` based on the active runtime. The `instrumentation` backend offers a wide range of mode options for fine-grained profiling, as detailed in the `mode.py` file.
 
 #### Instruction sampling
 
@@ -225,11 +277,16 @@ Therefore, `proton.deactivate(session_id=1)` is invalid, while `proton.deactivat
 By default, proton profiles are in the *json* format and can be read by *Hatchet*. The following command visualizes the profile data on terminal.
 
 ```bash
-pip install llnl-hatchet
+python3 -m pip install "pandas<3" llnl-hatchet
+proton-viewer --list <profile.hatchet>
 proton-viewer -m time/s <profile.hatchet>
 ```
 
 NOTE: `pip install hatchet` does not work because the API is slightly different.
+
+For Ascend profiles, `time`, `avg_time`, and `count` can be displayed in the
+scope tree. Derived `util` metrics remain unavailable until the device peak
+FLOPS and memory-bandwidth specifications are supplied.
 
 If you want to dump the entire trace but not just the aggregated data, you should set the data option to `trace` when starting the profiler.
 
