@@ -346,10 +346,46 @@ def _patch_module(mod):
     _OrigCMakeBuild = mod.CMakeBuild
 
     class CMakeBuild(_OrigCMakeBuild):
+        def get_proton_cmake_args(self):
+            cmake_args = super().get_proton_cmake_args()
+            cann_home = (
+                os.getenv("ASCEND_TOOLKIT_HOME", "")
+                or os.getenv("ASCEND_HOME_PATH", "")
+            )
+
+            mspti_include_dir = os.getenv("MSPTI_INCLUDE_DIR", "")
+            if not mspti_include_dir and cann_home:
+                mspti_include_dir = os.path.join(
+                    cann_home,
+                    "tools",
+                    "mspti",
+                    "include",
+                )
+
+            if mspti_include_dir:
+                cmake_args.append(
+                    f"-DMSPTI_INCLUDE_DIR={mspti_include_dir}"
+                )
+
+            mspti_lib_dir = os.getenv("MSPTI_LIB_DIR", "")
+            if not mspti_lib_dir and cann_home:
+                mspti_lib_dir = os.path.join(
+                    cann_home,
+                    "tools",
+                    "mspti",
+                    "lib64",
+                )
+
+            if mspti_lib_dir:
+                cmake_args.append(
+                    f"-DMSPTI_LIB_DIR={mspti_lib_dir}"
+                )
+            return cmake_args
 
         def run(self):
             _apply_triton_ascend_patch()
-
+            if mod.check_env_flag("TRITON_BUILD_PROTON", "ON"):
+                mod.download_and_copy_dependencies()
             try:
                 out = subprocess.check_output(["cmake", "--version"])
             except OSError:
