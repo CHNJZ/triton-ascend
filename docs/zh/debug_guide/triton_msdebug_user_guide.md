@@ -1,4 +1,4 @@
-# Triton Msdebug 使用指南
+# Triton msDebug 使用指南
 
 ## 简介
 
@@ -25,22 +25,24 @@ msDebug 不用于调试 Triton 编译器 Pass 本身。如果程序在生成 `ke
 
 ### 环境准备
 
-- 请参考[MindStudio Debugger安装指南](../install_guide/msdebug_install_guide.md)安装msDebug工具。
-- 若要使能msDebug工具，需通过以下两种方法安装NPU驱动固件（CANN 8.1.RC1之后的版本且驱动为25.0.RC1之后的版本，推荐使用方法一）：
-  - 方法一：驱动安装时指定`--full`参数，然后再使用root用户执行`echo 1 > /proc/debug_switch`命令启用调试通道，msDebug工具便可正常使用。
-    
-    ```bash
-    ./Ascend-hdk-<chip_type>-npu-driver_<version>_linux-<arch>.run --full
-    ```
-  - 方法二：驱动安装时指定`--debug`参数，具体安装操作请参见《CANN 软件安装指南》中的“[安装NPU驱动固件](https://www.hiascend.com/document/detail/zh/canncommercial/83RC1/softwareinst/instg/instg_0005.html?Mode=PmIns&InstallType=netconda&OS=openEuler&Software=cannToolKit)”章节。
-    
-    ```bash
-    ./Ascend-hdk-<chip_type>-npu-driver_<version>_linux-<arch>.run --debug
-    ```
+- 请参考 [MindStudio Debugger 安装指南](https://gitcode.com/Ascend/msdebug/blob/master/docs/zh/install_guide/msdebug_install_guide.md)安装 msDebug 工具。
+- 若要使能 msDebug 工具，需通过以下两种方法安装 NPU 驱动固件（CANN 8.1.RC1 之后的版本且驱动为 25.0.RC1 之后的版本，推荐使用方法一）。
+
+**方法一**：驱动安装时指定 `--full` 参数，然后再使用 root 用户执行 `echo 1 > /proc/debug_switch` 命令启用调试通道，msDebug 工具便可正常使用。
+
+```bash
+./Ascend-hdk-<chip_type>-npu-driver_<version>_linux-<arch>.run --full
+```
+
+**方法二**：驱动安装时指定 `--debug` 参数，具体安装操作请参见《CANN 软件安装指南》中的“[安装 NPU 驱动固件](https://www.hiascend.com/document/detail/zh/canncommercial/83RC1/softwareinst/instg/instg_0005.html?Mode=PmIns&InstallType=netconda&OS=openEuler&Software=cannToolKit)”章节。
+
+```bash
+./Ascend-hdk-<chip_type>-npu-driver_<version>_linux-<arch>.run --debug
+```
 
 ### 为 Triton Kernel 生成调试信息
 
-当前 Triton-Ascend 启用msdebug功能需要开启以下环境变量:
+当前 Triton-Ascend 启用 msDebug 功能需要开启以下环境变量：
 
 ```bash
 export LLVM_EXTRACT_DI_LOCAL_VARIABLES=1
@@ -88,7 +90,7 @@ SIMD、SIMT、AIC、AIV、Core Dump 和局部变量打印的支持范围可能�
 | `thread step-in` | `s` | 尝试进入函数 | `s` |
 | `thread step-out` | `finish` | 执行到当前函数返回 | `finish` |
 | `register read -a` | `re r -a` | 读取当前核全部可用寄存器 | `register read -a` |
-| `register read $REG` | `re r $REG` | 读取指定寄存器 | `re r $PC $GPR0` |
+| `register read` | `re r` | 读取指定寄存器 | 见下方示例 |
 | `ascend info devices` | - | 查看 Device 信息 | `ascend info devices` |
 | `ascend info cores` | - | 查看核、PC、Block 和停止原因 | `ascend info cores` |
 | `ascend info tasks` | - | 查看 Task 信息 | `ascend info tasks` |
@@ -103,6 +105,12 @@ SIMD、SIMT、AIC、AIV、Core Dump 和局部变量打印的支持范围可能�
 | `thread backtrace` | `bt` | 查看调用栈，当前主要用于 Core Dump | `bt` |
 | `ascend info summary` | - | 查看 Core Dump 摘要 | `ascend info summary` |
 | `help <command>` | - | 查看本机命令帮助 | `help memory read` |
+
+读取指定寄存器时，寄存器名前需添加 `$`，例如：
+
+```text
+(msdebug) register read $PC $GPR0
+```
 
 `memory read` 常用选项：
 
@@ -147,7 +155,7 @@ def add_kernel(
 
     x = tl.load(x_ptr + offsets)
     y = tl.load(y_ptr + offsets)
-    
+
     output = x + y
 
     tl.store(output_ptr + offsets, output)
@@ -177,7 +185,7 @@ if __name__ == "__main__":
 
     x = torch.tensor(a, device = 'npu')
     y = torch.tensor(b, device = 'npu')
-    
+
     output_triton = vector_add(x, y)
 
     print(output_triton)
