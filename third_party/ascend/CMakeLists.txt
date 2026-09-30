@@ -159,7 +159,21 @@ endif()
 
 # To enable hitest coverage tool
 if(TRITON_ENABLE_COVERAGE_HITEST)
-  set_target_properties(TritonAscend PROPERTIES
+  set(_hitest_ascend_targets
+    TritonAscend
+    triton-mlir-opt
+  )
+  if(TRITON_ASCEND_HAS_INPROC_COSTMODEL)
+    list(APPEND _hitest_ascend_targets
+      obj.AscendModelIR
+      AscendModelIR
+      obj.AscendModelAnalysis
+      AscendModelAnalysis
+      obj.AscendModelTransforms
+      AscendModelTransforms
+    )
+  endif()
+  set_target_properties(${_hitest_ascend_targets} PROPERTIES
     RULE_LAUNCH_COMPILE "hitestwrapper"
     RULE_LAUNCH_LINK "hitestwrapper"
   )

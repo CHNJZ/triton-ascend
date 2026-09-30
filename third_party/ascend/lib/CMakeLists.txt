@@ -22,10 +22,12 @@ if(TRITON_ENABLE_COVERAGE_HITEST)
       TritonToHFusion
       TritonToHIVM
       TritonToLinalg
+      TritonToGraph
       TritonControlFlowOpt
       TritonToLLVM
       TritonToStructured
       TritonToUnstructure
+      DynamicCVPipeline
       MLIRTritonNPUUtils           # from Utils
       TritonMemoryAccessCore
       TritonMemoryAccessAnalysis
