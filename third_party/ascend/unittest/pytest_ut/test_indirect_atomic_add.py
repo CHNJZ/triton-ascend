@@ -30,6 +30,7 @@
 #  | fully unstructured indirect offsets             | (C1) | (C2) | (C3) | (C4) | (C5) |
 #  | loaded mask + masked-off out-of-bounds offsets   | (D1) |  -   |  -   |  -   |  -   |
 #  | scalar-splat mask shared by load and atomic      | (E1) |  -   |  -   |  -   |  -   |
+#  | scalar-splat mask + used atomic return value     | (F1) |  -   |  -   |  -   |  -   |
 #
 # Notes:
 # 1. Case A exercises the structured-pointer discrete-mask atomic_add path.
@@ -39,7 +40,9 @@
 # 4. Case D verifies that a loaded discrete mask guards loaded invalid offsets.
 # 5. Case E verifies that a scalar-splat mask shared by an indirect load and
 #    atomic_add still guards inactive programs.
-# 6. Cases A-D validate both the final destination tensor and the atomic_add
+# 6. Case F verifies that the old-value copy and atomic store use the same
+#    scalar-splat-masked address range, including inactive invalid offsets.
+# 7. Cases A-D and F validate both the final destination tensor and the atomic_add
 #    return value, which must be the old value observed at each access.
 # =============================================================================
 
@@ -51,6 +54,8 @@ import torch_npu
 import triton
 import triton.language as tl
 from triton.backends.ascend.utils import is_compile_on_910_95
+
+_TARGET_ARCH = triton.runtime.driver.active.get_current_target().arch
 
 SUPPORTED_DTYPES = [
     ("int8", torch.int8),
@@ -127,6 +132,20 @@ def scalar_splat_mask_atomic_add_1d(
     mask = offsets < numel
     expert_id = tl.load(topk_ids_ptr + offsets, mask=mask, other=0)
     tl.atomic_add(tokens_cnts_ptr + expert_id, 1, mask=mask)
+
+
+@triton.jit(do_not_specialize=["numel"])
+def scalar_splat_mask_atomic_add_return_value_1d(
+    idx_ptr,
+    out_ptr,
+    old_ptr,
+    numel,
+):
+    pid = tl.program_id(0)
+    offset = tl.load(idx_ptr + pid)
+    mask = pid < numel
+    old = tl.atomic_add(out_ptr + offset, 1, mask=mask)
+    tl.store(old_ptr + pid, old, mask=mask)
 
 
 @triton.jit
@@ -501,7 +520,7 @@ def _launch_fully_unstructured(rank, offsets, values, output, old, shape):
 @pytest.mark.parametrize("dtype_name, torch_dtype", TEST_DTYPE)
 @pytest.mark.parametrize("rank", TEST_RANKS)
 def test_atomic_add_structured_pointer_with_discrete_mask(dtype_name, torch_dtype, rank):
-    if not is_compile_on_910_95() and torch_dtype in (torch.uint32, torch.uint64):
+    if not is_compile_on_910_95(_TARGET_ARCH) and torch_dtype in (torch.uint32, torch.uint64):
         pytest.skip("uint32 and uint64 atomics are only supported on 950")
     shape = RANK_SHAPES[rank]
     values = _build_value_tensor(shape, torch_dtype).npu()
@@ -529,7 +548,7 @@ def test_atomic_add_structured_pointer_with_discrete_mask(dtype_name, torch_dtyp
 def test_atomic_add_partially_structured_indirect_offsets(dtype_name, torch_dtype, rank):
     if rank == 1:
         pytest.skip("Partially structured test is not applicable to 1-D tensors")
-    if not is_compile_on_910_95() and torch_dtype in (torch.uint32, torch.uint64):
+    if not is_compile_on_910_95(_TARGET_ARCH) and torch_dtype in (torch.uint32, torch.uint64):
         pytest.skip("uint32 and uint64 atomics are only supported on 950")
     shape = PARTIAL_STRUCTURED_SHAPES[rank]
     offsets, output_numel = _build_partial_structured_offsets(shape)
@@ -552,7 +571,7 @@ def test_atomic_add_partially_structured_indirect_offsets(dtype_name, torch_dtyp
 @pytest.mark.parametrize("dtype_name, torch_dtype", TEST_DTYPE)
 @pytest.mark.parametrize("rank", TEST_RANKS)
 def test_atomic_add_fully_unstructured_indirect_offsets(dtype_name, torch_dtype, rank):
-    if not is_compile_on_910_95() and torch_dtype in (torch.uint32, torch.uint64):
+    if not is_compile_on_910_95(_TARGET_ARCH) and torch_dtype in (torch.uint32, torch.uint64):
         pytest.skip("uint32 and uint64 atomics are only supported on 950")
     shape = RANK_SHAPES[rank]
     offsets, output_numel = _build_fully_unstructured_offsets(shape)
@@ -573,7 +592,7 @@ def test_atomic_add_fully_unstructured_indirect_offsets(dtype_name, torch_dtype,
 
 
 def test_atomic_add_loaded_mask_skips_oob_offsets():
-    if not is_compile_on_910_95():
+    if not is_compile_on_910_95(_TARGET_ARCH):
         pytest.skip("masked indirect atomic template is only enabled on 910_95/950")
 
     block_size = 8
@@ -632,3 +651,34 @@ def test_atomic_add_scalar_splat_mask_skips_inactive_programs():
 
     expected = torch.tensor([1, 1, 1, 0], dtype=torch.int32)
     assert torch.equal(tokens_cnts.cpu(), expected)
+
+
+def test_atomic_add_scalar_splat_mask_return_value_skips_oob_offsets():
+    numel = 3
+    grid_size = 8
+    invalid_offset = 1 << 30
+    old_sentinel = -777
+
+    offsets = torch.tensor(
+        [0, 1, 2] + [invalid_offset] * (grid_size - numel),
+        dtype=torch.int64,
+    ).npu()
+    baseline = torch.tensor([10, 20, 30], dtype=torch.int32)
+    output = baseline.clone().npu()
+    old = torch.full((grid_size, ), old_sentinel, dtype=torch.int32).npu()
+
+    scalar_splat_mask_atomic_add_return_value_1d[(grid_size, )](
+        offsets,
+        output,
+        old,
+        numel,
+    )
+    torch.npu.synchronize()
+
+    expected_output = baseline + 1
+    expected_old = torch.tensor(
+        [10, 20, 30] + [old_sentinel] * (grid_size - numel),
+        dtype=torch.int32,
+    )
+    _assert_equal(output, expected_output, "int32", 1, "scalar-splat-mask-return-value/output")
+    _assert_equal(old, expected_old, "int32", 1, "scalar-splat-mask-return-value/old")

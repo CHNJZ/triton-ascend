@@ -1,5 +1,5 @@
-// RUN: triton-opt %s --triton-to-unstructure='compile-on-910-95=true force-simt-template=true' \
-// RUN:                --triton-to-linalg='compile-on-910-95=true' --split-input-file \
+// RUN: triton-opt %s --triton-to-unstructure='compile-on-910-95=true compile-mode=simd_simt_template' \
+// RUN:                --triton-to-linalg='compile-on-910-95=true compile-mode=simd_simt_template' --split-input-file \
 // RUN: | FileCheck %s
 
 // -----
@@ -169,7 +169,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
 // CHECK-LABEL: module attributes {
 // CHECK: hacc.coalesce_axis = 0 : i32
 // CHECK: hacc.coalesce_factor = 4 : i32
-// CHECK: func.func private @[[$SCAN:triton_cumsum_[0-9]+]](tensor<16x4xf32>, i32, i1) -> tensor<16x4xf32>
+// CHECK: func.func private @[[$SCAN:triton_cumsum[_0-9]*]](tensor<16x4xf32>, i32, i1) -> tensor<16x4xf32>
 // CHECK-LABEL: func.func @strided_axis_scan_axis0
 // CHECK: memref.reinterpret_cast
 // CHECK-SAME: sizes: [16, 4]

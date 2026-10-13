@@ -30,19 +30,22 @@ from typing import Any
 import pytest
 
 try:
+    import triton
     from triton.backends.ascend.utils import is_compile_on_910_95
+    _target_arch = triton.runtime.driver.active.get_current_target().arch
 except Exception:
+    _target_arch = ""
 
-    def is_compile_on_910_95():
+    def is_compile_on_910_95(_arch):
         return False
 
 
 # Do this before importing torch_npu, Triton, or defining JIT kernels.  In
 # particular, an Ascend 910B4 must collect this module as skipped rather than
 # execute a value-only fallback and be mistaken for a 910_95 gate-on result.
-if not is_compile_on_910_95():
+if not is_compile_on_910_95(_target_arch):
     pytest.skip(
-        "requires a detected Ascend 910_95 / 950 toolchain; 910B4 is not a "
+        "requires a detected Ascend 950 toolchain; 910B4 is not a "
         "native gate-on substitute",
         allow_module_level=True,
     )
@@ -50,7 +53,6 @@ if not is_compile_on_910_95():
 torch = pytest.importorskip("torch")
 pytest.importorskip("torch_npu")
 
-import triton
 import triton.language as tl
 from triton.backends.ascend import compiler as ascend_compiler
 from triton.backends.ascend import driver as ascend_driver
@@ -124,11 +126,11 @@ def _launch_with_observer(monkeypatch, kernel, grid, *args, **compile_options):
 
 
 def _assert_real_91095_gate(compiled, *, pure_simt: bool) -> None:
-    """Do not let a manually forced option masquerade as device gate-on."""
+    """Do not let a manual mode override masquerade as device gate-on."""
     assert compiled.metadata.compile_on_910_95 is True
-    assert compiled.metadata.force_simt_only is pure_simt
+    assert compiled.metadata.is_pure_simt is pure_simt
     if not pure_simt:
-        assert compiled.metadata.force_simt_template is True
+        assert compiled.metadata.compile_mode == "simd_simt_template"
 
 
 @triton.jit
@@ -205,7 +207,7 @@ def test_row_91095_native_metadata_launcher_and_ir(monkeypatch):
         dst,
         n,
         BLOCK=16,
-        force_simt_only=True,
+        compile_mode="simt_only",
     )
 
     assert torch.equal(dst.cpu(), src.cpu())
@@ -370,7 +372,7 @@ def test_chunk_rejects_data_reaching_pid_predicate_91095(monkeypatch):
     assert all("gridY = gridY / 16;" not in launcher for launcher in observer.launcher_sources)
 
 
-@pytest.mark.skip(reason="The case is not supported on A5, skipping for now. Will be fixed in future.")
+@pytest.mark.skip(reason="The case is not supported on Ascend 950, skipping for now. Will be fixed in future.")
 def test_sls_91095_native_ir_metadata_and_mixed_simt_launcher(monkeypatch):
     """SLS emits the masked indirect-load path and preserves its launch ABI."""
     n = 1024
@@ -405,8 +407,9 @@ def test_sls_91095_native_ir_metadata_and_mixed_simt_launcher(monkeypatch):
     assert "parallel_mode = \"mix_simd_simt\"" in sls_ir
 
     launcher = observer.launcher_with("rtKernelLaunchWithFlagV2")
-    assert launcher.count("rtKernelLaunchWithFlagV2") == 2
-    assert launcher.count("rtArgsEx_t argsInfo") == 2
-    # The same historical value must reach cfgInfo in both generated launcher
+    # cfg setup is shared via the cann shim (once); both launch paths call it.
+    assert launcher.count("rtKernelLaunchWithFlagV2") == 1
+    assert launcher.count("rtArgsEx_t argsInfo") == 1
+    # The same historical value must reach cfgInfo via both generated launcher
     # paths; the target is not allowed to silently pick a different ABI value.
-    assert launcher.count("cfgInfo.localMemorySize = 221184;") == 2
+    assert launcher.count("cann_get_launch_kernel_cfg(221184)") == 2

@@ -20,13 +20,16 @@
  * THE SOFTWARE.
  */
 
+#include "TritonToGraph/DotRowCoalescing.h"
 #include "TritonToGraph/GraphOptimizationRule.h"
 #include "TritonToGraph/LegacyMemoryAccess/RowCoalescing.h"
+#include "TritonToGraph/ProgramAxisDependenceAnalysis.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
 #include "mlir/Dialect/Math/IR/Math.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/Verifier.h"
@@ -35,10 +38,13 @@
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/Support/Debug.h"
 
 #include <algorithm>
 #include <memory>
 #include <optional>
+
+#define DEBUG_TYPE "graph-optimize"
 
 using namespace mlir;
 using namespace triton;
@@ -50,6 +56,10 @@ constexpr llvm::StringLiteral kCoalesceFactorAttr = "hacc.coalesce_factor";
 constexpr llvm::StringLiteral kCoalesceAxisAttr = "hacc.coalesce_axis";
 constexpr llvm::StringLiteral kCoalesceGridCeilDivAttr =
     "hacc.coalesce_grid_ceil_div";
+constexpr llvm::StringLiteral kIndependentAxisTensorizeMarkerAttr =
+    "hacc.independent_axis_tensorize";
+constexpr llvm::StringLiteral kPersistentTaskStripMiningMarkerAttr =
+    "hacc.persistent_task_strip_mining";
 
 constexpr int64_t kDefaultRowsPerProgram = 8;
 constexpr int64_t kMaxBaseElementsPerLift = 1024;
@@ -95,7 +105,11 @@ bool hasDirectCall(triton::FuncOp function) {
   return hasCall;
 }
 
-bool readsAxisNumPrograms(triton::FuncOp function, int32_t axis) {
+bool readsAxisNumPrograms(
+    triton::FuncOp function, int32_t axis,
+    const ProgramAxisDependenceAnalysis *programAxisAnalysis = nullptr) {
+  if (programAxisAnalysis)
+    return programAxisAnalysis->get(axis).readsNumPrograms;
   bool reads = false;
   function.walk([&](triton::GetNumProgramsOp np) {
     if (np.getAxisAsInt() == axis)
@@ -112,6 +126,14 @@ bool isScalarIntegerLike(Value value) {
   return integerType && integerType.getWidth() > 1;
 }
 
+bool isAutomaticOverflowAssert(triton::AssertOp assertOp) {
+  if (!assertOp || !assertOp->hasAttr("tt.auto_overflow_assert"))
+    return false;
+  auto message = dyn_cast<StringAttr>(assertOp.getMessageAttr());
+  return message &&
+         message.getValue().contains("overflow detected for operation");
+}
+
 bool isInWorkRegion(Operation *operation, Block *workBlock) {
   for (Operation *current = operation; current;
        current = current->getParentOp()) {
@@ -124,6 +146,8 @@ bool isInWorkRegion(Operation *operation, Block *workBlock) {
 bool isRowLiftable(Operation *operation) {
   if (isa<triton::ReturnOp, cf::BranchOp, cf::CondBranchOp>(operation))
     return false;
+  if (auto assertOp = dyn_cast<triton::AssertOp>(operation))
+    return isAutomaticOverflowAssert(assertOp);
   if (Dialect *dialect = operation->getDialect()) {
     StringRef dialectNamespace = dialect->getNamespace();
     if (dialectNamespace == arith::ArithDialect::getDialectNamespace() ||
@@ -227,7 +251,9 @@ bool hasEscapingWorkResult(ArrayRef<Operation *> ordered, Block *workBlock) {
   return false;
 }
 
-std::optional<RowSeed> matchRowSeed(triton::FuncOp function) {
+std::optional<RowSeed> matchRowSeed(
+    triton::FuncOp function,
+    const ProgramAxisDependenceAnalysis *programAxisAnalysis = nullptr) {
   SmallVector<triton::GetProgramIdOp> pids;
   function.walk([&](triton::GetProgramIdOp pid) { pids.push_back(pid); });
   if (pids.size() != 1)
@@ -235,7 +261,7 @@ std::optional<RowSeed> matchRowSeed(triton::FuncOp function) {
 
   triton::GetProgramIdOp pid = pids.front();
   const int32_t axis = pid.getAxisAsInt();
-  if (readsAxisNumPrograms(function, axis))
+  if (readsAxisNumPrograms(function, axis, programAxisAnalysis))
     return std::nullopt;
 
   for (Operation *user : pid.getResult().getUsers()) {
@@ -275,17 +301,21 @@ std::optional<RowSeed> matchRowSeed(triton::FuncOp function) {
   return std::nullopt;
 }
 
-std::optional<RowCandidate> analyzeRow(triton::FuncOp function) {
+std::optional<RowCandidate>
+analyzeRow(triton::FuncOp function,
+           const ProgramAxisDependenceAnalysis *programAxisAnalysis = nullptr) {
   ModuleOp module = function->getParentOfType<ModuleOp>();
   if (!module || !isPublicEntry(function) ||
       !isOnlyPublicEntry(module, function) || function->getNumRegions() != 1 ||
       function->getRegion(0).empty() || hasDirectCall(function) ||
+      module->hasAttr(kIndependentAxisTensorizeMarkerAttr) ||
+      module->hasAttr(kPersistentTaskStripMiningMarkerAttr) ||
       module->hasAttr(kCoalesceFactorAttr) ||
       module->hasAttr(kCoalesceAxisAttr) ||
       module->hasAttr(kCoalesceGridCeilDivAttr))
     return std::nullopt;
 
-  std::optional<RowSeed> seed = matchRowSeed(function);
+  std::optional<RowSeed> seed = matchRowSeed(function, programAxisAnalysis);
   if (!seed)
     return std::nullopt;
 
@@ -331,14 +361,20 @@ public:
   }
 
   LogicalResult apply(IRRewriter &rewriter) override {
+    return applyWithResult(rewriter) == RewritePlanApplyResult::Applied
+               ? success()
+               : failure();
+  }
+
+  RewritePlanApplyResult applyWithResult(IRRewriter &rewriter) override {
     (void)rewriter;
     std::optional<RowCandidate> current = analyzeRow(candidate.function);
     if (!current || !matchesCandidate(candidate, *current))
-      return failure();
+      return RewritePlanApplyResult::NotApplicable;
 
     ModuleOp module = candidate.function->getParentOfType<ModuleOp>();
     if (!module)
-      return failure();
+      return RewritePlanApplyResult::Failed;
 
     // The old Row implementation can still encounter a late unsupported
     // shape while materializing.  Run it on a detached one-function module;
@@ -348,7 +384,7 @@ public:
     sandbox.getBody()->push_back(candidate.function->clone());
     auto clonedFunction = dyn_cast<triton::FuncOp>(&sandbox.getBody()->front());
     if (!clonedFunction)
-      return failure();
+      return RewritePlanApplyResult::Failed;
 
     RowCoalescing::rewriteRowCoalesce(sandbox);
     auto factor = sandbox->getAttrOfType<IntegerAttr>(kCoalesceFactorAttr);
@@ -359,7 +395,7 @@ public:
         factor.getInt() != candidate.rowsPerProgram ||
         axis.getInt() != candidate.axis || ceilDiv.getInt() != 1 ||
         failed(mlir::verify(sandbox.getOperation())))
-      return failure();
+      return RewritePlanApplyResult::NotApplicable;
 
     // takeBody() is non-failing.  Commit the function IR first, then publish
     // the complete launcher contract as one final, non-failing step.
@@ -370,7 +406,7 @@ public:
     module->setAttr(kCoalesceAxisAttr,
                     IntegerAttr::get(i32Type, candidate.axis));
     module->setAttr(kCoalesceGridCeilDivAttr, IntegerAttr::get(i32Type, 1));
-    return success();
+    return RewritePlanApplyResult::Applied;
   }
 
 private:
@@ -379,28 +415,52 @@ private:
 };
 
 class RowCoalescingRule final : public GraphOptimizationRule {
+  bool enableLegacyPattern;
+
 public:
+  explicit RowCoalescingRule(bool enableLegacyPattern)
+      : enableLegacyPattern(enableLegacyPattern) {}
+
   GraphOptimizationRuleId getId() const override {
     return GraphOptimizationRuleId::RowCoalescing;
   }
 
   AnalysisRequirement getAnalysisRequirements() const override {
-    return AnalysisRequirement::None;
+    return AnalysisRequirement::ProgramAxisDependence;
   }
 
   LogicalResult findCandidates(
       GraphOptimizationContext &context,
       SmallVectorImpl<std::unique_ptr<RewritePlan>> &plans) override {
+    // The legacy pattern is enabled only for simt_only. Dot row coalescing
+    // belongs to the non-pure-SIMT path and must not override that pattern.
+    if (!enableLegacyPattern) {
+      if (auto plan = createDotRowCoalescingPlan(context.getFunction(),
+                                                 context.getEpoch()))
+        plans.push_back(std::move(plan));
+      return success();
+    }
+
     if (std::optional<RowCandidate> candidate =
-            analyzeRow(context.getFunction()))
+            analyzeRow(context.getFunction(),
+                       &context.getProgramAxisDependenceAnalysis())) {
+      LLVM_DEBUG(llvm::dbgs()
+                 << "[" DEBUG_TYPE "] matched graph optimization rule "
+                 << static_cast<unsigned>(getId()) << " ("
+                 << getGraphOptimizationRuleName(getId()) << ") in @"
+                 << candidate->function.getName()
+                 << ": axis=" << candidate->axis
+                 << " rowsPerProgram=" << candidate->rowsPerProgram << "\n");
       plans.push_back(
           std::make_unique<RowCoalescingPlan>(*candidate, context.getEpoch()));
+    }
     return success();
   }
 };
 
 } // namespace
 
-std::unique_ptr<GraphOptimizationRule> cfg::createRowCoalescingRule() {
-  return std::make_unique<RowCoalescingRule>();
+std::unique_ptr<GraphOptimizationRule>
+cfg::createRowCoalescingRule(bool enableLegacy) {
+  return std::make_unique<RowCoalescingRule>(enableLegacy);
 }

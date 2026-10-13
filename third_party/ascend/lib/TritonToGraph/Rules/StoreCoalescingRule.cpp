@@ -33,6 +33,7 @@
 #include "triton/Dialect/Triton/IR/Types.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/Support/Debug.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -40,6 +41,8 @@
 #include <memory>
 #include <optional>
 #include <utility>
+
+#define DEBUG_TYPE "graph-optimize"
 
 using namespace mlir;
 using namespace triton;
@@ -719,28 +722,37 @@ private:
 
 class StoreCoalescingRule final : public GraphOptimizationRule {
 public:
-  explicit StoreCoalescingRule(unsigned ubCapacityBytes)
-      : ubCapacityBytes(ubCapacityBytes) {}
+  StoreCoalescingRule(unsigned ubCapacityBytes, bool enabledForCompileMode)
+      : ubCapacityBytes(ubCapacityBytes),
+        enabledForCompileMode(enabledForCompileMode) {}
 
   GraphOptimizationRuleId getId() const override {
     return GraphOptimizationRuleId::StoreCoalescing;
   }
 
   AnalysisRequirement getAnalysisRequirements() const override {
-    return ubCapacityBytes == 0 ? AnalysisRequirement::None
-                                : AnalysisRequirement::EntryArgPointerAlias;
+    return !enabledForCompileMode || ubCapacityBytes == 0
+               ? AnalysisRequirement::None
+               : AnalysisRequirement::EntryArgPointerAlias;
   }
 
   LogicalResult findCandidates(
       GraphOptimizationContext &context,
       SmallVectorImpl<std::unique_ptr<RewritePlan>> &plans) override {
-    if (ubCapacityBytes == 0)
+    if (!enabledForCompileMode || ubCapacityBytes == 0)
       return success();
 
     const EntryArgPointerAliasAnalysis *entryAliases =
         &context.getEntryArgPointerAliasAnalysis();
     for (const StoreCoalescingRun &run :
          findRuns(context.getFunction(), ubCapacityBytes, entryAliases)) {
+      LLVM_DEBUG(llvm::dbgs()
+                 << "[" DEBUG_TYPE "] matched graph optimization rule "
+                 << static_cast<unsigned>(getId()) << " ("
+                 << getGraphOptimizationRuleName(getId()) << ") at "
+                 << run.anchor->getLoc()
+                 << ": stores=" << run.programOrderStores.size() << " elements="
+                 << run.totalElements << " bytes=" << run.totalBytes << "\n");
       plans.push_back(std::make_unique<StoreCoalescingPlan>(
           run, context.getFunction(), entryAliases, ubCapacityBytes,
           context.getEpoch()));
@@ -750,11 +762,14 @@ public:
 
 private:
   unsigned ubCapacityBytes;
+  bool enabledForCompileMode;
 };
 
 } // namespace
 
 std::unique_ptr<GraphOptimizationRule>
-cfg::createStoreCoalescingRule(unsigned ubCapacityBytes) {
-  return std::make_unique<StoreCoalescingRule>(ubCapacityBytes);
+cfg::createStoreCoalescingRule(unsigned ubCapacityBytes,
+                               const StoreCoalescingRuleOptions &options) {
+  return std::make_unique<StoreCoalescingRule>(ubCapacityBytes,
+                                               options.enabledForCompileMode);
 }

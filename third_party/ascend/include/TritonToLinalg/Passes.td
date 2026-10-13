@@ -11,7 +11,7 @@ def TritonToLinalg : Pass<"triton-to-linalg", "mlir::ModuleOp"> {
             "bool", /*default*/"true",
             "generate a global kernel">,
         Option<"namedOps", "named-ops",
-            "bool", /*default*/"false",
+            "bool", /*default*/"true",
             "use linalg named ops instead of linalg.generic">,
         Option<"enableNd2nzOnVector", "enable-nd2nz-on-vector",
             "bool", /*default*/"false",
@@ -21,7 +21,10 @@ def TritonToLinalg : Pass<"triton-to-linalg", "mlir::ModuleOp"> {
             "enable select analysis">,
         Option<"compileOn91095", "compile-on-910-95",
             "bool", /*default*/"false",
-            "compile on 910_95">
+            "compile on 910_95">,
+        Option<"compileMode", "compile-mode",
+            "std::string", /*default*/"\"simd_simt_template\"",
+            "Compilation mode: simd, simd_simt_template (or unstructured_in_simt), simt_only">
     ];
 }
 

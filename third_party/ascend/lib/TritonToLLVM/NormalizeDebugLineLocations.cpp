@@ -192,9 +192,18 @@ bool isArithmeticOrCastOp(Operation *op) {
          name.contains("trunc");
 }
 
+bool isUserVisibleLoadAnchorOp(Operation *op) {
+  return op->getName().getStringRef() == "memref.copy";
+}
+
 bool isUserVisibleStoreAnchorOp(Operation *op) {
   return op->getName().getStringRef() ==
          "bufferization.materialize_in_destination";
+}
+
+bool isDebugNop(Operation *op) {
+  auto inlineAsm = dyn_cast<LLVM::InlineAsmOp>(op);
+  return inlineAsm && inlineAsm.getAsmString() == "nop";
 }
 
 bool isDestinationViewOp(Operation *op) {
@@ -217,8 +226,18 @@ bool isValuePreparationOp(Operation *op) {
          isTensorOnlyLinalgFillOp(op);
 }
 
+bool isFloatingPointExtensionOrTruncationOp(Operation *op) {
+  return llvm::StringSwitch<bool>(op->getName().getStringRef())
+      .Case("arith.extf", true)
+      .Case("arith.truncf", true)
+      .Default(false);
+}
+
 bool isAddressComputationOp(Operation *op) {
   StringRef name = op->getName().getStringRef();
+
+  if (isFloatingPointExtensionOrTruncationOp(op))
+    return false;
 
   return llvm::StringSwitch<bool>(name)
              .Case("memref.reinterpret_cast", true)
@@ -372,7 +391,7 @@ classifyOperation(Operation *op,
   if (!hasSourceLikeLocation(op))
     return DebugLineLocClass::Synthetic;
 
-  if (isUserVisibleStoreAnchorOp(op))
+  if (isUserVisibleLoadAnchorOp(op) || isUserVisibleStoreAnchorOp(op))
     return DebugLineLocClass::Semantic;
 
   if (isRealMemoryOrCallOp(op))
@@ -381,12 +400,16 @@ classifyOperation(Operation *op,
   if (isValuePreparationOp(op))
     return DebugLineLocClass::Synthetic;
 
-  if (isAddressComputationOp(op))
-    return DebugLineLocClass::Synthetic;
-
   SourceLine line = getSourceLine(canonicalizeSourceLoc(op->getLoc()));
   bool hasSemanticAnchorOnSameLine =
       line && semanticAnchors.lookup(line.getKey()) > 0;
+
+  if (isFloatingPointExtensionOrTruncationOp(op))
+    return hasSemanticAnchorOnSameLine ? DebugLineLocClass::Synthetic
+                                       : DebugLineLocClass::Semantic;
+
+  if (isAddressComputationOp(op))
+    return DebugLineLocClass::Synthetic;
 
   if (isArithmeticOrCastOp(op)) {
     if (hasSemanticAnchorOnSameLine)
@@ -459,6 +482,12 @@ bool retargetSyntheticOpToStoreLoc(Operation *op, Location originalLoc) {
     collectUserVisibleStoreLocsThroughTensorInsert(op, candidates);
 
   if (std::optional<Location> storeLoc = getUniqueStoreLoc(candidates)) {
+    SourceLine originalLine = getSourceLine(canonicalizeSourceLoc(originalLoc));
+    SourceLine targetLine = getSourceLine(canonicalizeSourceLoc(*storeLoc));
+
+    if (!originalLine || !targetLine || originalLine != targetLine)
+      return false;
+
     markRetargetedSyntheticOp(op, originalLoc, *storeLoc);
     return true;
   }
@@ -495,12 +524,101 @@ void collectSemanticAnchors(Block &block,
         isExplicitlyMarkedSynthetic(&op) || !hasSourceLikeLocation(&op))
       continue;
 
-    if (!isUserVisibleStoreAnchorOp(&op) && !isRealMemoryOrCallOp(&op))
+    if (!isUserVisibleLoadAnchorOp(&op) && !isUserVisibleStoreAnchorOp(&op) &&
+        !isRealMemoryOrCallOp(&op))
       continue;
 
     if (SourceLine line = getSourceLine(canonicalizeSourceLoc(op.getLoc())))
       ++semanticAnchors[line.getKey()];
   }
+}
+
+void relocateLoadDebugNops(Operation *root) {
+  llvm::StringMap<Operation *> loadAnchors;
+  llvm::StringMap<bool> ambiguousLoadLines;
+
+  root->walk([&](Operation *op) {
+    if (!isUserVisibleLoadAnchorOp(op))
+      return;
+
+    SourceLine line = getSourceLine(canonicalizeSourceLoc(op->getLoc()));
+    if (!line)
+      return;
+
+    std::string key = line.getKey();
+    auto [it, inserted] = loadAnchors.try_emplace(key, op);
+    if (!inserted && it->second != op)
+      ambiguousLoadLines[key] = true;
+  });
+
+  struct Relocation {
+    Operation *nop;
+    Operation *anchor;
+  };
+
+  llvm::SmallVector<Relocation> relocations;
+  llvm::StringMap<bool> scheduledLines;
+
+  root->walk([&](Operation *op) {
+    if (!isDebugNop(op))
+      return;
+
+    SourceLine line = getSourceLine(canonicalizeSourceLoc(op->getLoc()));
+    if (!line)
+      return;
+
+    std::string key = line.getKey();
+    if (ambiguousLoadLines.lookup(key) || scheduledLines.lookup(key))
+      return;
+
+    auto anchorIt = loadAnchors.find(key);
+    if (anchorIt == loadAnchors.end())
+      return;
+
+    Operation *anchor = anchorIt->second;
+
+    // If the NOP is already immediately before the load anchor, keep it.
+    if (op->getBlock() == anchor->getBlock() && op->getNextNode() == anchor) {
+      scheduledLines[key] = true;
+      return;
+    }
+
+    scheduledLines[key] = true;
+    relocations.push_back({op, anchor});
+  });
+
+  // A debug NOP has no operands or results, so it is safe to move it across
+  // blocks within the same function and place it immediately before the
+  // corresponding memref.copy.
+  for (const Relocation &relocation : relocations)
+    relocation.nop->moveBefore(relocation.anchor);
+}
+
+void demoteRedundantStoreDebugNops(Operation *root) {
+  llvm::StringMap<unsigned> storeAnchorLines;
+
+  root->walk([&](Operation *op) {
+    if (!isUserVisibleStoreAnchorOp(op))
+      return;
+
+    if (SourceLine line = getSourceLine(canonicalizeSourceLoc(op->getLoc())))
+      ++storeAnchorLines[line.getKey()];
+  });
+
+  llvm::SmallVector<Operation *> redundantNops;
+  root->walk([&](Operation *op) {
+    if (!isDebugNop(op))
+      return;
+
+    SourceLine line = getSourceLine(canonicalizeSourceLoc(op->getLoc()));
+    if (!line || storeAnchorLines.lookup(line.getKey()) == 0)
+      return;
+
+    redundantNops.push_back(op);
+  });
+
+  for (Operation *nop : redundantNops)
+    markOperation(nop, DebugLineLocClass::Synthetic);
 }
 
 struct NormalizeDebugLineLocationsPass
@@ -539,7 +657,15 @@ struct NormalizeDebugLineLocationsPass
     }
   }
 
-  void runOnOperation() override { processRegions(getOperation()); }
+  void runOnOperation() override {
+    Operation *root = getOperation().getOperation();
+
+    relocateLoadDebugNops(root);
+
+    processRegions(root);
+
+    demoteRedundantStoreDebugNops(root);
+  }
 };
 
 } // namespace
