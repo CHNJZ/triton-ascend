@@ -243,8 +243,7 @@ void MsptiProfiler::MsptiProfilerPimpl::callbackFn(
       const auto *kernelName = cbData->symbolName;
       if (kernelName == nullptr || kernelName[0] == '\0')
         kernelName = cbData->functionName;
-      std::string callbackKernelName =
-          kernelName == nullptr ? "" : kernelName;
+      std::string callbackKernelName = kernelName == nullptr ? "" : kernelName;
       if (!isPrintableAscii(callbackKernelName))
         callbackKernelName = "kernel";
       std::lock_guard<std::mutex> lock(callbackKernelNamesMutex);
