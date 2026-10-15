@@ -38,6 +38,28 @@ std::unordered_map<uint64_t, std::string> callbackKernelNames;
 std::mutex callbackKernelNamesMutex;
 std::atomic<size_t> pendingKernelActivities{0};
 
+class ScopedCallbackState {
+public:
+  ScopedCallbackState() : previousState(ContextSource::getThreadState()) {
+    if (previousState.has_value())
+      return;
+    auto activeState = ContextSource::getActiveState();
+    if (!activeState.has_value())
+      return;
+    ContextSource::setThreadState(std::move(activeState));
+    installedState = true;
+  }
+
+  ~ScopedCallbackState() {
+    if (installedState)
+      ContextSource::setThreadState(std::move(previousState));
+  }
+
+private:
+  std::optional<Context> previousState;
+  bool installedState{false};
+};
+
 bool isPrintableAscii(const std::string &value) {
   return !value.empty() &&
          std::all_of(value.begin(), value.end(), [](unsigned char character) {
@@ -236,6 +258,7 @@ void MsptiProfiler::MsptiProfilerPimpl::callbackFn(
 
     bool ownsOp = false;
     if (!hasHookOp) {
+      ScopedCallbackState callbackState;
       callbackCreatingOp = true;
       threadState.enterOp();
       callbackCreatingOp = false;

@@ -102,6 +102,33 @@ def test_restart_after_finalize(tmp_path, npu_tensors):
         assert kernel_count(path) == expected
 
 
+def test_state_without_hook(tmp_path, npu_tensors):
+    x, y = npu_tensors
+    path = tmp_path / "state_no_hook.hatchet"
+    session = proton.start(str(path.with_suffix("")), backend="mspti")
+    try:
+        with proton.scope("state_scope"):
+            with proton.state("warmup"):
+                launch(x, y, 1)
+            with proton.state("steady"):
+                launch(x, y, 1)
+    finally:
+        proton.finalize(session)
+
+    profile = json.loads(path.read_text(encoding="utf-8"))
+    root = profile[0]
+    scope = next(child for child in root["children"] if child.get("frame", {}).get("name") == "state_scope")
+    states = {child.get("frame", {}).get("name"): child for child in scope.get("children", [])}
+    assert states.keys() == {"warmup", "steady"}
+    for state in states.values():
+        kernels = [
+            node for node in walk_profile(state.get("children", []))
+            if node.get("frame", {}).get("name") == "lifecycle_add_kernel"
+        ]
+        assert len(kernels) == 1
+        assert kernels[0].get("metrics", {}).get("count") == 1
+
+
 def test_multiple_streams(tmp_path, npu_tensors):
     x, _ = npu_tensors
     path = tmp_path / "streams.hatchet"
