@@ -351,19 +351,10 @@ void MsptiProfiler::MsptiProfilerPimpl::callbackFn(
       msptiDebugLog("callback no-hook enter-op end op=%zu", threadState.opId);
       callbackCreatingOp = false;
       externalId = threadState.opId;
-      const auto *kernelName = cbData->symbolName;
-      msptiDebugLog("callback no-hook name-select begin symbol=%p function=%p",
-                    const_cast<char *>(cbData->symbolName),
-                    const_cast<char *>(cbData->functionName));
-      if (kernelName == nullptr || kernelName[0] == '\0')
-        kernelName = cbData->functionName;
-      msptiDebugLog("callback no-hook name-copy begin selected=%p",
-                    const_cast<char *>(kernelName));
-      std::string callbackKernelName = kernelName == nullptr ? "" : kernelName;
-      msptiDebugLog("callback no-hook name-copy end size=%zu",
-                    callbackKernelName.size());
-      if (!isPrintableAscii(callbackKernelName))
-        callbackKernelName = "kernel";
+      // Some CANN 9.2 runtimes return a non-dereferenceable symbolName for
+      // MSPTI_CBID_RUNTIME_LAUNCH. The kernel activity name is preferred later.
+      std::string callbackKernelName{"kernel"};
+      msptiDebugLog("callback no-hook installed fallback kernel name");
       std::lock_guard<std::mutex> lock(callbackKernelNamesMutex);
       callbackKernelNames[externalId] = std::move(callbackKernelName);
       ownsOp = true;
