@@ -4,7 +4,6 @@
 #include "Device.h"
 #include "Driver/GPU/MsptiApi.h"
 
-#include <algorithm>
 #include <atomic>
 #include <cstdlib>
 #include <deque>
@@ -12,7 +11,6 @@
 #include <mutex>
 #include <stdexcept>
 #include <string>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -34,8 +32,6 @@ thread_local bool callbackCreatingOp = false;
 // threads. Preserve launch order so callbacks can reuse hook-created ops.
 std::deque<uint64_t> pendingExternalIds;
 std::mutex pendingExternalIdsMutex;
-std::unordered_map<uint64_t, std::string> callbackKernelNames;
-std::mutex callbackKernelNamesMutex;
 std::atomic<size_t> pendingKernelActivities{0};
 
 class ScopedCallbackState {
@@ -59,13 +55,6 @@ private:
   std::optional<Context> previousState;
   bool installedState{false};
 };
-
-bool isPrintableAscii(const std::string &value) {
-  return !value.empty() &&
-         std::all_of(value.begin(), value.end(), [](unsigned char character) {
-           return character >= 0x20 && character <= 0x7e;
-         });
-}
 
 std::shared_ptr<Metric>
 convertActivityToMetric(const msptiActivityKernel *kernel) {
@@ -96,17 +85,8 @@ void processActivityKernel(MsptiProfiler::CorrIdToExternIdMap &corrIdToExternId,
 
   auto [parentId, numInstances] = corrIdToExternId.at(corrId);
   const auto isApiOp = apiExternIds.contain(parentId);
-  std::string apiKernelName{"kernel"};
-  if (isApiOp) {
-    std::lock_guard<std::mutex> lock(callbackKernelNamesMutex);
-    auto nameIt = callbackKernelNames.find(parentId);
-    if (nameIt != callbackKernelNames.end()) {
-      apiKernelName = std::move(nameIt->second);
-      callbackKernelNames.erase(nameIt);
-    }
-    if (isPrintableAscii(activityKernelName))
-      apiKernelName = activityKernelName;
-  }
+  const std::string apiKernelName =
+      activityKernelName.empty() ? "kernel" : activityKernelName;
 
   for (auto *data : dataSet) {
     auto metric = convertActivityToMetric(kernel);
@@ -263,14 +243,6 @@ void MsptiProfiler::MsptiProfilerPimpl::callbackFn(
       threadState.enterOp();
       callbackCreatingOp = false;
       externalId = threadState.opId;
-      const auto *kernelName = cbData->symbolName;
-      if (kernelName == nullptr || kernelName[0] == '\0')
-        kernelName = cbData->functionName;
-      std::string callbackKernelName = kernelName == nullptr ? "" : kernelName;
-      if (!isPrintableAscii(callbackKernelName))
-        callbackKernelName = "kernel";
-      std::lock_guard<std::mutex> lock(callbackKernelNamesMutex);
-      callbackKernelNames[externalId] = std::move(callbackKernelName);
       ownsOp = true;
     }
     mspti::activityPushExternalCorrelationId<true>(
@@ -296,10 +268,6 @@ void MsptiProfiler::MsptiProfilerPimpl::doStart() {
   }
   profiler.correlation.corrIdToExternId.clear();
   profiler.correlation.apiExternIds.clear();
-  {
-    std::lock_guard<std::mutex> lock(callbackKernelNamesMutex);
-    callbackKernelNames.clear();
-  }
   pendingKernelActivities.store(0, std::memory_order_relaxed);
   mspti::subscribe<true>(&subscriber, callbackFn, nullptr);
   mspti::activityRegisterCallbacks<true>(allocBuffer, completeBuffer);
@@ -329,10 +297,6 @@ void MsptiProfiler::MsptiProfilerPimpl::doStop() {
   subscriber = nullptr;
   profiler.correlation.corrIdToExternId.clear();
   profiler.correlation.apiExternIds.clear();
-  {
-    std::lock_guard<std::mutex> lock(callbackKernelNamesMutex);
-    callbackKernelNames.clear();
-  }
   pendingKernelActivities.store(0, std::memory_order_relaxed);
   std::lock_guard<std::mutex> lock(pendingExternalIdsMutex);
   pendingExternalIds.clear();
