@@ -460,9 +460,8 @@ def patch_module(mod):
 
     mod.get_llvm_package_info = get_llvm_package_info
 
-    # 3. Skip NVIDIA toolchain downloads for normal Ascend builds. Proton
-    #    still needs the CUDA/CUPTI headers provided by this helper.
-    _download_and_copy_dependencies = mod.download_and_copy_dependencies
+    # 3. Skip downloading NVIDIA proprietary toolchain dependencies
+    #    (ptxas/cuobjdump/...); they are irrelevant for the Ascend wheel.
     mod.download_and_copy_dependencies = lambda *args, **kwargs: None
 
     # 4. Patch CMakeBuild to apply the Ascend patch / coverage / tools.
@@ -471,7 +470,8 @@ def patch_module(mod):
     class CMakeBuild(_OrigCMakeBuild):
 
         def get_proton_cmake_args(self):
-            cmake_args = super().get_proton_cmake_args()
+            cmake_args = mod.get_thirdparty_packages([mod.get_json_package_info()])
+            cmake_args += self.get_pybind11_cmake_args()
             cann_home = (os.getenv("ASCEND_TOOLKIT_HOME", "") or os.getenv("ASCEND_HOME_PATH", ""))
 
             cann_include_dir = os.getenv("CANN_INCLUDE_DIR", "")
@@ -508,8 +508,6 @@ def patch_module(mod):
 
         def run(self):
             _apply_triton_ascend_patch()
-            if mod.check_env_flag("TRITON_BUILD_PROTON", "ON"):
-                _download_and_copy_dependencies()
 
             enable_hitest = os.getenv("TRITON_ENABLE_COVERAGE_HITEST", "0").lower() \
                             in ("1", "on", "true")

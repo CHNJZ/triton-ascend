@@ -4,7 +4,7 @@ import triton
 from triton._C.libproton import proton as libproton  # type: ignore
 from triton._C.libtriton import getenv  # type: ignore
 from .flags import flags
-from .hooks import HookManager, LaunchHook, InstrumentationHook
+from .hooks import HookManager, LaunchHook, InstrumentationHook, MsptiCorrelationHook
 from .mode import BaseMode
 from typing import Optional, Union
 
@@ -120,6 +120,8 @@ def start(
 
     if hook == "triton":
         HookManager.register(LaunchHook(), session)
+    elif backend == "mspti" and hook is None:
+        HookManager.register(MsptiCorrelationHook(), session)
     if backend == "instrumentation":
         HookManager.register(InstrumentationHook(mode), session)
 

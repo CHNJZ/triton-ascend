@@ -1,19 +1,27 @@
 #include "Device.h"
 #include "Driver/GPU/CannApi.h"
+#ifdef PROTON_BUILD_CUDA
 #include "Driver/GPU/CudaApi.h"
+#endif
+#ifdef PROTON_BUILD_HIP
 #include "Driver/GPU/HipApi.h"
+#endif
 
 #include "Utility/Errors.h"
 
 namespace proton {
 
 Device getDevice(DeviceType type, uint64_t index) {
+#ifdef PROTON_BUILD_CUDA
   if (type == DeviceType::CUDA) {
     return cuda::getDevice(index);
   }
+#endif
+#ifdef PROTON_BUILD_HIP
   if (type == DeviceType::HIP) {
     return hip::getDevice(index);
   }
+#endif
   if (type == DeviceType::NPU) {
     return cann::getDevice(index);
   }
