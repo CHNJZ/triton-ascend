@@ -647,6 +647,8 @@ def _parse_ttir_metadata(ttir: str, metadata: dict):
 
 def get_common_bishengir_compile_options(metadata):
     bishengir_target = metadata['target'].arch
+    if _is_a5_target_arch(bishengir_target):
+        bishengir_target = "Ascend950"
     bishengir_target_opt = f"--target={bishengir_target}"
     return [bishengir_target_opt]
 
@@ -789,7 +791,7 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
         _compile_option_list += [f"--enable-optimized-metaop={is_cann_version_at_least(9, 2, 0)}"]
 
         npu_utils = NPUUtils()
-        if npu_utils.has_device_limit():
+        if _is_a5_target_arch(metadata["target"].arch) or npu_utils.has_device_limit():
             _compile_option_list += [
                 f"--custom-aic-number={npu_utils.get_aicore_num()}",
             ]
@@ -1507,7 +1509,7 @@ def ttir_to_npubin(mod, metadata, opt):
                 _compile_option_list += [f"--disable-fma"]
             if opt.compile_on_910_95:
                 npu_utils = NPUUtils()
-                if npu_utils.has_device_limit():
+                if _is_a5_target_arch(metadata["target"].arch) or npu_utils.has_device_limit():
                     _compile_option_list += [
                         f"--custom-aic-number={npu_utils.get_aicore_num()}",
                         f"--custom-aiv-number={npu_utils.get_aivector_core_num()}",
