@@ -22,6 +22,11 @@ target_link_libraries(triton-mlir-opt PRIVATE
   BiShengIRScopeDialect
   BiShengIRSymbolDialect
   BiShengIRTensorDialect
+  # HIVMAVE/AVE, needed to parse TLA SIMD kernels (ave.hir.*)
+  MLIRAVEDialect
+  # TritonInstrumentToLLVM (pulled by triton_libs) directly calls these
+  # NVIDIA helpers. Keep them after triton_libs for static-link ordering.
+  TritonNVIDIAGPUToLLVM
 )
 
 mlir_check_all_link_libraries(triton-mlir-opt)
