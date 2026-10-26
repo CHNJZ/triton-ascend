@@ -4,7 +4,9 @@ Semantics: C[M, N] = A[M, K] @ B[K, N] + bias  (vector stage adds a constant per
 
 Stages (env TLA_TEST_STAGE, default all with auto-degrade):
   ir      : offline-compile the HIVM IR handed to npuir and assert
-            (2 nd2nz / 1 mmadL1 / 1 fixpipe, 1 store, cbuf/cc/ub alloc, AIC+AIV scope)
+            (2 nd2nz / 1 mmadL1 / 1 fixpipe, 1 store, cbuf/cc/ub alloc,
+            cube scope carries only hivm.tcore_type<CUBE> (not a VF),
+            vector scope keeps the AIV VF markers)
   compile : full compile, confirm .o/.npubin artifacts exist
   run     : real-device launch + accuracy (GEMM_BIAS OK; standard Triton
             reference gemm_bias_triton, same semantics/shape ->
@@ -83,11 +85,17 @@ def test_ir(output_dir=None):
     module = lower_offline(module, ctx, output_dir=output_dir)
     text = str(module)
     check_lowered_ir(text, loads=0, stores=1, buffers=4,
-                     extra=("#hivm.address_space<cbuf>", "#hivm.address_space<cc>", "#hivm.func_core_type<AIC>"))
+                     extra=("#hivm.address_space<cbuf>", "#hivm.address_space<cc>",
+                            "#hivm.tcore_type<CUBE>", "#hivm.func_core_type<AIV>"))
     assert text.count("hivm.hir.nd2nz") == 2, "GM->L1 x2"
     assert text.count("hivm.hir.mmadL1") == 1, "one gemm"
     assert text.count("hivm.hir.fixpipe") == 1, "L0C->UB"
     assert 'mix_mode = "mix"' in text, "cube+vector kernel must be tagged mix"
+    # The AIC (cube) scope is not a vector function: hivm.vector_function may
+    # appear only on the SIMD scope (exactly once), and the tla.memory_effect
+    # attribute was dropped with the VF effect recording.
+    assert text.count("hivm.vector_function") == 1, "only the SIMD scope is a VF"
+    assert "hivm.memory_effect" not in text, "VF effect recording was removed"
     print("IR PASS: gemm_bias HIVM structure ok (2 nd2nz / 1 mmadL1 / 1 fixpipe / 1 store)")
 
 

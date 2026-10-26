@@ -4,7 +4,8 @@ Semantics: C[M, N] = A[M, K] @ B[K, N]  (fp16 in, f32 accumulate in L0C)
 
 Stages (env TLA_TEST_STAGE, default all with auto-degrade):
   ir      : offline-compile the HIVM IR handed to npuir and assert
-            (2 nd2nz / 1 mmadL1 / 1 fixpipe, cbuf/cc alloc, AIC scope)
+            (2 nd2nz / 1 mmadL1 / 1 fixpipe, cbuf/cc alloc, cube scope
+            carries only hivm.tcore_type<CUBE> and is not a VF)
   compile : full compile, confirm .o/.npubin artifacts exist
   run     : real-device launch + accuracy (GEMM_BASIC OK; standard Triton
             reference gemm_triton, same semantics/shape -> TRITON_GEMM_BASIC OK)
@@ -72,11 +73,16 @@ def test_ir(output_dir=None):
     module = lower_offline(module, ctx, output_dir=output_dir)
     text = str(module)
     check_lowered_ir(text, loads=0, stores=0, buffers=3,
-                     extra=("#hivm.address_space<cbuf>", "#hivm.address_space<cc>", "#hivm.func_core_type<AIC>"))
+                     extra=("#hivm.address_space<cbuf>", "#hivm.address_space<cc>",
+                            "#hivm.tcore_type<CUBE>"))
     assert text.count("hivm.hir.nd2nz") == 2, "GM->L1 x2"
     assert text.count("hivm.hir.mmadL1") == 1, "one gemm"
     assert text.count("hivm.hir.fixpipe") == 1, "L0C->GM"
     assert 'mix_mode = "mix"' in text, "kernel with cube work must be tagged mix"
+    # Pure-cube kernel: AIC scope is not a vector function, so no VF markers
+    # (hivm.vector_function / func_core_type / outline) may appear.
+    assert text.count("hivm.vector_function") == 0, "cube scope must not be a VF"
+    assert "hivm.memory_effect" not in text, "VF effect recording was removed"
     print("IR PASS: gemm_basic HIVM structure ok (2 nd2nz / 1 mmadL1 / 1 fixpipe)")
 
 

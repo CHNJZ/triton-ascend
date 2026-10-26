@@ -31,7 +31,7 @@ Exports: ``alloc_buffer``/``alloc`` (on-chip buffer + versions),
 """
 
 from .core import buffer, buffer_type
-from .vf import scope
+from .scope import scope
 from .alloc import alloc_buffer, alloc
 from .copy import copy
 from .view import view, reshape

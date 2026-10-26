@@ -83,17 +83,6 @@ __all__ = [
     "membar",
 ]
 
-# Module-level VF effect recording, set to a list during the scope.simd
-# handler's dummy body visit so load/store can report their buffer access
-# (read/write).
-# The handler derives the VF function's memory-effect summary from it.
-_VF_EFFECTS = None
-
-
-def _record_vf_effect(buf, effect):
-    if _VF_EFFECTS is not None and isinstance(buf, buffer):
-        _VF_EFFECTS.append((buf, effect))
-
 
 def _lanes_for(tag):
     """Full-register lane count; i64/u64 span 4096 bits (2x VL_BITS)."""
@@ -215,8 +204,8 @@ def vlds(ptr, offsets=None, *, dist="NORM", elem=None, _semantic=None) -> tensor
     lanes = _lanes_for(elem_tag)
     ss.check_dist(dist, ss.LOAD_DISTS, "load")
     base, indices = _resolve_base_and_indices(ptr, offsets, _semantic)
-    _record_vf_effect(ptr, "read")
-    handle = _semantic.builder.create_simd_vlds(base, indices, elem_tag, lanes, dist)
+    handle = _semantic.builder.create_simd_vlds(base, indices, elem_tag,
+                                                 lanes, dist)
     return tl.tensor(handle, tl.block_type(elem_ty, [lanes]))
 
 
@@ -251,8 +240,8 @@ def vsts(ptr, offsets_or_val, val=None, *, dist=None, mask=None, _semantic=None)
     if mask is None:
         mask = _all_mask(val_lanes, _semantic)
     base, indices = _resolve_base_and_indices(ptr, offsets, _semantic)
-    _record_vf_effect(ptr, "write")
-    _semantic.builder.create_simd_vsts(base, indices, val.handle, mask.handle, dist)
+    _semantic.builder.create_simd_vsts(base, indices, val.handle, mask.handle,
+                                         dist)
 
 
 @builtin
