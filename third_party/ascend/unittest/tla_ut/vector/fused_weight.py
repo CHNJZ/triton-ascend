@@ -74,7 +74,7 @@ def _launch():
     H = torch.randn(s["h"], dtype=torch.bfloat16, device="npu")
     E = torch.randn(s["h"], dtype=torch.bfloat16, device="npu")
     O = torch.empty(s["h"], dtype=torch.float32, device="npu")
-    fused_weight[(s["cores"], )](H, E, O, **constexprs())
+    fused_weight[(s["cores"], )](H, E, O, enable_tla_mode=True, **constexprs())
     torch.npu.synchronize()
     return H, E, O
 

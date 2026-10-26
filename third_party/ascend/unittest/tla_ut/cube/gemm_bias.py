@@ -33,8 +33,10 @@ SIGNATURE = {"A_ptr": "*fp16", "B_ptr": "*fp16", "C_ptr": "*fp32"}
 
 
 @triton.jit
-def gemm_bias(A_ptr, B_ptr, C_ptr, M: tl.constexpr, N: tl.constexpr, K: tl.constexpr, BIAS: tl.constexpr):
-    tl.static_assert(K % 16 == 0 and M % 16 == 0 and N % 16 == 0, "M/N/K must be multiples of 16 (cube tile)")
+def gemm_bias(A_ptr, B_ptr, C_ptr, M: tl.constexpr, N: tl.constexpr, K: tl.constexpr,
+              BIAS: tl.constexpr):
+    tl.static_assert(K % 16 == 0 and M % 16 == 0 and N % 16 == 0,
+                     "M/N/K must be multiples of 16 (cube tile)")
     tl.static_assert((M * N) % 64 == 0, "M*N must be a multiple of 64 (vector lanes)")
     a_l1 = tla.alloc_buffer((M, K), tl.float16, space="l1")
     b_l1 = tla.alloc_buffer((K, N), tl.float16, space="l1")
@@ -44,18 +46,18 @@ def gemm_bias(A_ptr, B_ptr, C_ptr, M: tl.constexpr, N: tl.constexpr, K: tl.const
     b_blk = tla.view(B_ptr, (K, N), strides=(N, 1))
     c_blk = tla.view(C_ptr, (M, N), strides=(N, 1))
     with tla.scope.cube():
-        tla.copy(a_blk, a_l1)  # hivm.hir.nd2nz
-        tla.copy(b_blk, b_l1)  # hivm.hir.nd2nz
+        tla.copy(a_blk, a_l1)               # hivm.hir.nd2nz
+        tla.copy(b_blk, b_l1)               # hivm.hir.nd2nz
         tla.cube.mmad(a_l1, b_l1, c_l0c, clear_accum=True)  # hivm.hir.mmadL1
-        tla.copy(c_l0c, c_ub)  # hivm.hir.fixpipe (2D ub dst -> nz2nd, ND into UB)
+        tla.copy(c_l0c, c_ub)               # hivm.hir.fixpipe (2D ub dst -> nz2nd, ND into UB)
     with tla.scope.simd():
         bias = tla.simd.vfull(BIAS, tl.float32, 64)
         for i in tl.static_range((M * N) // 64):
             row = i // (N // 64)
             col = (i % (N // 64)) * 64
-            v = tla.simd.vlds(c_ub[row, col])  # NORM, ND row-major read
+            v = tla.simd.vlds(c_ub[row, col])          # NORM, ND row-major read
             tla.simd.vsts(c_ub[row, col], tla.simd.vadd(v, bias))
-    tla.copy(c_ub, c_blk)  # hivm.hir.store (MTE3 UB->GM)
+    tla.copy(c_ub, c_blk)                   # hivm.hir.store (MTE3 UB->GM)
 
 
 def constexprs():
@@ -67,7 +69,8 @@ def constexprs():
 
 
 @triton.jit
-def gemm_bias_triton(A_ptr, B_ptr, C_ptr, M: tl.constexpr, N: tl.constexpr, K: tl.constexpr, BIAS: tl.constexpr):
+def gemm_bias_triton(A_ptr, B_ptr, C_ptr, M: tl.constexpr, N: tl.constexpr, K: tl.constexpr,
+                     BIAS: tl.constexpr):
     rows = tl.arange(0, M)
     cols = tl.arange(0, N)
     a = tl.load(A_ptr + rows[:, None] * K + cols[None, :])
@@ -104,7 +107,7 @@ def _launch():
     A = torch.randn(s["M"], s["K"], dtype=torch.float16, device="npu")
     B = torch.randn(s["K"], s["N"], dtype=torch.float16, device="npu")
     C = torch.full((s["M"], s["N"]), 7.0, dtype=torch.float32, device="npu")
-    gemm_bias[(1, )](A, B, C, **constexprs())
+    gemm_bias[(1,)](A, B, C, enable_tla_mode=True, **constexprs())
     torch.npu.synchronize()
     return C, (A.float() @ B.float() + s["BIAS"])
 
@@ -114,7 +117,7 @@ def _launch_triton():
     A = torch.randn(s["M"], s["K"], dtype=torch.float16, device="npu")
     B = torch.randn(s["K"], s["N"], dtype=torch.float16, device="npu")
     C = torch.full((s["M"], s["N"]), 7.0, dtype=torch.float32, device="npu")
-    gemm_bias_triton[(1, )](A, B, C, **constexprs())
+    gemm_bias_triton[(1,)](A, B, C, **constexprs())
     torch.npu.synchronize()
     return C, (A.float() @ B.float() + s["BIAS"])
 

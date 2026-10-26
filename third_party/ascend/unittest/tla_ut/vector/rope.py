@@ -78,7 +78,7 @@ def _launch():
     X = torch.randn(s["b"], s["s"], s["nh"], s["rd"], dtype=torch.float32, device="npu")
     CS = torch.randn(s["s"], s["rd"], dtype=torch.float32, device="npu")
     x_orig = X.cpu().clone()  # X is updated in place by the kernel
-    rope[(s["cores"], )](X, CS, **constexprs())
+    rope[(s["cores"], )](X, CS, enable_tla_mode=True, **constexprs())
     torch.npu.synchronize()
     x0 = x_orig[..., :64]
     x1 = x_orig[..., 64:]

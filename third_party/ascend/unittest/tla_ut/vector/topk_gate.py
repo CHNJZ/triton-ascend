@@ -108,7 +108,7 @@ def _launch():
     SCR = torch.randn(s["tmax"], s["e"], dtype=torch.float32, device="npu")
     IDX = torch.full((s["tmax"], 2 * s["k"]), -1, dtype=torch.int32, device="npu")
     FLAG = torch.zeros(s["tmax"], dtype=torch.float32, device="npu")
-    topk_gate[(s["cores"], )](SCR, IDX, FLAG, s["tmax"], **constexprs())
+    topk_gate[(s["cores"], )](SCR, IDX, FLAG, s["tmax"], enable_tla_mode=True, **constexprs())
     torch.npu.synchronize()
     return SCR, IDX, FLAG
 

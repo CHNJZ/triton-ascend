@@ -105,7 +105,7 @@ def _launch():
     X = torch.randn(s["tmax"], s["hid"], dtype=torch.float32, device="npu").to(torch.float8_e4m3fn)
     SF = torch.randn(s["tmax"], s["hid"] // s["npc"], dtype=torch.float32, device="npu")
     O = torch.full((s["tmax"], s["hid"]), 7.0, dtype=torch.float32, device="npu")
-    cast_back[(s["cores"], )](X, SF, O, s["tmax"], **constexprs())
+    cast_back[(s["cores"], )](X, SF, O, s["tmax"], enable_tla_mode=True, **constexprs())
     torch.npu.synchronize()
     scale = SF.repeat_interleave(s["npc"], dim=1)  # (tmax, hid)
     ref = X.float() * scale  # fp8 -> f32

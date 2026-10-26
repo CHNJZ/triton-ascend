@@ -98,7 +98,7 @@ def _launch():
     s = SHAPE
     X = torch.randn(s["tmax"], s["h"], dtype=torch.bfloat16, device="npu")
     O = torch.full((s["tmax"], s["mhc"], s["h"]), -1.0, dtype=torch.bfloat16, device="npu")
-    expand_to_mhc_fwd[(s["cores"], )](X, O, s["tmax"], **constexprs())
+    expand_to_mhc_fwd[(s["cores"], )](X, O, s["tmax"], enable_tla_mode=True, **constexprs())
     torch.npu.synchronize()
     ref = X.unsqueeze(1).expand(s["tmax"], s["mhc"], s["h"])
     return O, ref

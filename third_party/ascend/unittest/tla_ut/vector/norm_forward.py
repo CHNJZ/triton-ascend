@@ -86,7 +86,7 @@ def _launch():
     X = torch.randn(s["tmax"], s["hid"], dtype=torch.bfloat16, device="npu")
     W = torch.randn(s["hid"], dtype=torch.bfloat16, device="npu")
     O = torch.empty(s["tmax"], s["hid"], dtype=torch.float32, device="npu")
-    rmsnorm[(s["cores"], )](X, W, O, s["tmax"], **constexprs())
+    rmsnorm[(s["cores"], )](X, W, O, s["tmax"], enable_tla_mode=True, **constexprs())
     torch.npu.synchronize()
     xf = X.float()
     mean_sq = (xf * xf).mean(-1, keepdim=True) + s["eps"]

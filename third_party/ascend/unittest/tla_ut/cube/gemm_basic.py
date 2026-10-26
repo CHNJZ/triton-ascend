@@ -32,7 +32,8 @@ SIGNATURE = {"A_ptr": "*fp16", "B_ptr": "*fp16", "C_ptr": "*fp32"}
 
 @triton.jit
 def gemm_basic(A_ptr, B_ptr, C_ptr, M: tl.constexpr, N: tl.constexpr, K: tl.constexpr):
-    tl.static_assert(K % 16 == 0 and M % 16 == 0 and N % 16 == 0, "M/N/K must be multiples of 16 (cube tile)")
+    tl.static_assert(K % 16 == 0 and M % 16 == 0 and N % 16 == 0,
+                     "M/N/K must be multiples of 16 (cube tile)")
     a_l1 = tla.alloc_buffer((M, K), tl.float16, space="l1")
     b_l1 = tla.alloc_buffer((K, N), tl.float16, space="l1")
     c_l0c = tla.alloc_buffer((M, N), tl.float32, space="l0c")
@@ -40,10 +41,10 @@ def gemm_basic(A_ptr, B_ptr, C_ptr, M: tl.constexpr, N: tl.constexpr, K: tl.cons
     b_blk = tla.view(B_ptr, (K, N), strides=(N, 1))
     c_blk = tla.view(C_ptr, (M, N), strides=(N, 1))
     with tla.scope.cube():
-        tla.copy(a_blk, a_l1)  # hivm.hir.nd2nz
-        tla.copy(b_blk, b_l1)  # hivm.hir.nd2nz
+        tla.copy(a_blk, a_l1)               # hivm.hir.nd2nz
+        tla.copy(b_blk, b_l1)               # hivm.hir.nd2nz
         tla.cube.mmad(a_l1, b_l1, c_l0c, clear_accum=True)  # hivm.hir.mmadL1
-        tla.copy(c_l0c, c_blk)  # hivm.hir.fixpipe (2D dst -> nz2nd)
+        tla.copy(c_l0c, c_blk)              # hivm.hir.fixpipe (2D dst -> nz2nd)
 
 
 def constexprs():
@@ -58,9 +59,9 @@ def constexprs():
 def gemm_triton(A_ptr, B_ptr, C_ptr, M: tl.constexpr, N: tl.constexpr, K: tl.constexpr):
     rows = tl.arange(0, M)
     cols = tl.arange(0, N)
-    a = tl.load(A_ptr + rows[:, None] * K + cols[None, :])  # (M, K)
-    b = tl.load(B_ptr + cols[:, None] * K + rows[None, :])  # (N, K) -> load B(K, N) transposed
-    c = tl.sum(a[:, :, None] * b[None, :, :], axis=1)  # (M, N) f32 accumulate
+    a = tl.load(A_ptr + rows[:, None] * K + cols[None, :])   # (M, K)
+    b = tl.load(B_ptr + cols[:, None] * K + rows[None, :])   # (N, K) -> load B(K, N) transposed
+    c = tl.sum(a[:, :, None] * b[None, :, :], axis=1)        # (M, N) f32 accumulate
     tl.store(C_ptr + rows[:, None] * N + cols[None, :], c)
 
 
@@ -91,7 +92,7 @@ def _launch():
     A = torch.randn(s["M"], s["K"], dtype=torch.float16, device="npu")
     B = torch.randn(s["K"], s["N"], dtype=torch.float16, device="npu")
     C = torch.full((s["M"], s["N"]), 7.0, dtype=torch.float32, device="npu")
-    gemm_basic[(1, )](A, B, C, **constexprs())
+    gemm_basic[(1,)](A, B, C, enable_tla_mode=True, **constexprs())
     torch.npu.synchronize()
     return C, (A.float() @ B.float())
 
@@ -101,7 +102,7 @@ def _launch_triton():
     A = torch.randn(s["M"], s["K"], dtype=torch.float16, device="npu")
     B = torch.randn(s["K"], s["N"], dtype=torch.float16, device="npu")
     C = torch.full((s["M"], s["N"]), 7.0, dtype=torch.float32, device="npu")
-    gemm_triton[(1, )](A, B, C, **constexprs())
+    gemm_triton[(1,)](A, B, C, **constexprs())
     torch.npu.synchronize()
     return C, (A.float() @ B.float())
 
