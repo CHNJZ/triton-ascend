@@ -34,7 +34,7 @@ from .core import buffer, buffer_type
 from .vf import scope
 from .alloc import alloc_buffer, alloc
 from .copy import copy
-from .view import view
+from .view import view, reshape
 from .aux_ops import annotate_buffer_versions
 from . import math
 from .math import compensated_rstd
@@ -56,6 +56,7 @@ __all__ = [
     "alloc",
     "copy",
     "view",
+    "reshape",
 
     # core-mode scopes (scope.simd / scope.cube)
     "scope",

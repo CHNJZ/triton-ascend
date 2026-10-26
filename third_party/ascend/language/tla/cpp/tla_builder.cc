@@ -29,6 +29,7 @@
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Dialect/Utils/ReshapeOpsUtils.h"
 #include "mlir/Dialect/Vector/IR/VectorOps.h"
 #include "mlir/IR/Block.h"
 #include "mlir/IR/BuiltinAttributes.h"
@@ -117,6 +118,22 @@ MemRefLayoutAttrInterface tlaBufferLayout(MLIRContext *ctx,
     return {};
   return StridedLayoutAttr::get(ctx, offset.value_or(ShapedType::kDynamic),
                                 strides);
+}
+
+// Static rank-reshape pieces: memref.collapse_shape / expand_shape with an
+// explicit reassociation (groups of source dims per result dim).  The
+// decomposition logic lives in the Python frontend (tla.reshape); these
+// bindings only materialize the ops.  Shapes must be static and identity
+// layouts are enforced there, so the emitted ops stay canonical.
+template <typename ReshapeOp>
+Value createReshapeOp(TLABuilder &self, Value source, Type resultType,
+                      const std::vector<std::vector<int64_t>> &reassociation) {
+  SmallVector<ReassociationIndices> groups;
+  for (const auto &group : reassociation)
+    groups.push_back(ReassociationIndices(group.begin(), group.end()));
+  return self.getBuilder()
+      .create<ReshapeOp>(self.getLastLoc(), resultType, source, groups)
+      .getResult();
 }
 
 } // namespace
@@ -532,6 +549,12 @@ void init_tla_builder(py::module &&m) {
                      self.getBuilder().getDenseI64ArrayAttr(strides))
                  .getResult();
            })
+      // memref.collapse_shape / expand_shape materialization (see
+      // createReshapeOp above for the reassociation plumbing).
+      .def("create_tla_collapse_shape", &createReshapeOp<memref::CollapseShapeOp>,
+           py::arg("source"), py::arg("result_type"), py::arg("reassociation"))
+      .def("create_tla_expand_shape", &createReshapeOp<memref::ExpandShapeOp>,
+           py::arg("source"), py::arg("result_type"), py::arg("reassociation"))
       .def("create_hivm_load",
            [](TLABuilder &self, Value src, Value dst) {
              if (!isa<MemRefType>(src.getType()) ||

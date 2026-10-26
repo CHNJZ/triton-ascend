@@ -44,6 +44,8 @@ def setup_unified_builder(main_builder, ascend_builder):
         'create_tla_bind',
         'create_tla_subview',
         'create_tla_reinterpret_cast',
+        'create_tla_collapse_shape',
+        'create_tla_expand_shape',
         'create_hivm_load',
         'create_hivm_store',
         'create_hivm_nd2nz',

@@ -90,6 +90,7 @@ class buffer(tl.base_value):
     def __init__(self, handle, ty):
         self.handle, self.type = handle, ty
         self.shape, self.dtype, self.space, self.strides = ty.shape, ty.element_ty, ty.space, ty.strides
+        self.offset = ty.offset
 
     def _flatten_ir(self, handles):
         handles.append(self.handle)
