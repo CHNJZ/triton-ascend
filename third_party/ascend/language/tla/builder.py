@@ -46,6 +46,9 @@ def setup_unified_builder(main_builder, ascend_builder):
         'create_tla_reinterpret_cast',
         'create_hivm_load',
         'create_hivm_store',
+        'create_hivm_nd2nz',
+        'create_hivm_fixpipe',
+        'create_hivm_mmadl1',
         'create_annotation_mark',
         'get_array_attr',
         'parse_attr',
@@ -72,6 +75,7 @@ def setup_unified_builder(main_builder, ascend_builder):
         'create_simd_vdintlv',
         'create_simd_bitcast',
         'create_scope_op',
+        'get_scope_entry_block',
         'scope_return',
     ]
     attach_builder_methods(main_builder, ascend_builder, ascend_methods)

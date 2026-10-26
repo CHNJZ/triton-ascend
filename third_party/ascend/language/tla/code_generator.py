@@ -30,25 +30,29 @@ def _vf_scope_attrs(builder, effect_strs, core_mode="vector"):
     The bishengir HFusion pipeline unconditionally runs outline-scope with
     outlineMarkedScopesOnly=true, which clones the scope attrs onto the
     extracted func.func and keeps an inline func.call at the original site.
-    ``hivm.vector_function`` + ``no_inline`` and ``hivm.func_core_type<AIV>``
-    reproduce the attrs the previously frontend-outlined VF carried, so the
-    HIVM stage behaves identically; no ``hivm.vf_mode`` is set, keeping the
-    SIMT path away. ``vector_mode``/``tcore_type`` mark this as a manual VF
-    scope for the HFusion pass pipeline (HFusionVectorizeOps, AutoVectorize).
+    ``hivm.vector_function`` + ``no_inline`` and the core type reproduce the
+    attrs the previously frontend-outlined function carried (``AIV`` for the
+    SIMD VF path, ``AIC`` for a cube-core region); no ``hivm.vf_mode`` is set,
+    keeping the SIMT path away. ``vector_mode``/``tcore_type`` mark this as a
+    manual scope for the HFusion pass pipeline (HFusionVectorizeOps,
+    AutoVectorize); a cube scope carries no ``vector_mode``.
     ``tla.memory_effect`` carries the per-argument buffer effects in the
     outline input order; outline-scope lowers it to per-argument
     ``hivm.memory_effect`` attrs.
     """
     tcore_type_str = ("#hivm.tcore_type<CUBE>" if core_mode == "cube" else "#hivm.tcore_type<VECTOR>")
-    return {
+    func_core_type_str = ("#hivm.func_core_type<AIC>" if core_mode == "cube" else "#hivm.func_core_type<AIV>")
+    attrs = {
         "no_inline": builder.get_unit_attr(),
         "outline": builder.get_unit_attr(),
-        "vector_mode": builder.get_string_attr("vec"),
         "tcore_type": builder.parse_attr(tcore_type_str),
-        "hivm.func_core_type": builder.parse_attr("#hivm.func_core_type<AIV>"),
+        "hivm.func_core_type": builder.parse_attr(func_core_type_str),
         "hivm.vector_function": builder.get_unit_attr(),
         "tla.memory_effect": builder.get_array_attr([builder.get_string_attr(eff) for eff in effect_strs]),
     }
+    if core_mode != "cube":
+        attrs["vector_mode"] = builder.get_string_attr("vec")
+    return attrs
 
 
 def handle_scope_with(generator, node):
@@ -73,14 +77,20 @@ def handle_scope_with(generator, node):
     with enter_sub_region(generator):
         ip, last_loc = generator._get_insertion_point_and_loc()
 
-        # Dummy visit to infer the (buffer, effect) pairs via simd._VF_EFFECTS.
-        simd_mod._VF_EFFECTS = []
-        dummy = generator.builder.create_block()
-        generator.builder.set_insertion_point_to_start(dummy)
-        generator.visit_compound_statement(node.body)
-        dummy.erase()
-        effects = simd_mod._VF_EFFECTS
-        simd_mod._VF_EFFECTS = None
+        if core_mode == "cube":
+            # Cube ops (nd2nz / mmadL1 / fixpipe) carry their own
+            # MemoryEffectsOpInterface; nothing to infer from simd register
+            # ops, so skip the VF effect sweep.
+            effects = []
+        else:
+            # Dummy visit to infer the (buffer, effect) pairs via simd._VF_EFFECTS.
+            simd_mod._VF_EFFECTS = []
+            dummy = generator.builder.create_block()
+            generator.builder.set_insertion_point_to_start(dummy)
+            generator.visit_compound_statement(node.body)
+            dummy.erase()
+            effects = simd_mod._VF_EFFECTS
+            simd_mod._VF_EFFECTS = None
 
         # Deduplicate buffers; merge read + write into read_write.
         ordered = []
@@ -97,8 +107,8 @@ def handle_scope_with(generator, node):
         effect_strs = [eff for _, eff in ordered]
 
         generator._set_insertion_point_and_loc(ip, last_loc)
-        scope_op, body = generator.builder.create_scope_op(_vf_scope_attrs(generator.builder, effect_strs, core_mode),
-                                                           [])
+        scope_op = generator.builder.create_scope_op(_vf_scope_attrs(generator.builder, effect_strs, core_mode), [])
+        body = generator.builder.get_scope_entry_block(scope_op)
         generator.builder.set_insertion_point_to_start(body)
         generator.visit_compound_statement(node.body)
         generator.builder.set_insertion_point_to_end(body)

@@ -44,6 +44,9 @@ from .device_assert import device_assert
 # (ave.hir.vextf) does not shadow unrelated top-level names.
 from . import simd
 
+# Cube-core ops (``mmad``/``tla.copy`` L1/L0C routes).
+from . import cube
+
 __all__ = [
     "buffer",
     "buffer_type",
@@ -67,4 +70,7 @@ __all__ = [
 
     # simd ops
     "simd",
+
+    # cube ops
+    "cube",
 ]
