@@ -144,6 +144,15 @@ void init_tla_builder(py::module &&m) {
       .def(py::init<MLIRContext *, std::string, std::string>(),
            py::arg("context"), py::arg("target") = "",
            py::arg("compile_mode") = "simd")
+      .def(
+          "create_tla_vector_type",
+          [](TLABuilder &, int64_t lanes, Type elementType) -> Type {
+            if (lanes <= 0 || !elementType.isIntOrFloat())
+              throw std::invalid_argument(
+                  "vector requires positive lanes and an integer or float element type");
+            return VectorType::get({lanes}, elementType);
+          },
+          py::arg("lanes"), py::arg("element_type"))
       // SIMD vector-register ops (AVE dialect, ave.hir.*).
       .def(
           "create_simd_vlds",
