@@ -15,7 +15,7 @@ Triton-Ascend
 </p>
 
 <p align="center">
-| <a href="https://triton-ascend.readthedocs.io/zh-cn/latest/"><b>官方文档</b></a> | <a href="https://www.hiascend.com/cn/developer/operator?tag=triton&tab=triton"><b>算子开发用户旅程</b></a> | <a href="https://docs.google.com/document/d/1qfat2wZtO2nfZb5FC2dWAcR6sTqgTNSvvh7MzTDoI4s/edit?pli=1&tab=t.0"><b>社区例会</b></a> | <a href="https://www.hiascend.com/"><b>关于昇腾</b></a> |
+| <a href="https://triton-ascend.readthedocs.io/zh-cn/latest/"><b>官方文档</b></a> | <a href="https://www.hiascend.com/cn/developer/operator?tag=triton&tab=triton"><b>算子开发用户旅程</b></a> | <a href="https://docs.google.com/document/d/1qfat2wZtO2nfZb5FC2dWAcR6sTqgTNSvvh7MzTDoI4s/edit?pli=1&tab=t.0"><b>社区例会</b></a> | <a href="https://www.hiascend.com/"><b>关于华为昇腾</b></a> |
 </p>
 
 ---
@@ -51,7 +51,7 @@ Triton-Ascend
 
 支持的操作系统：Linux(aarch64/x86_64)
 
-支持的Ascend产品：Atlas A2系列产品、Atlas A3系列产品、Ascend 950PR&950DT系列产品
+支持的华为昇腾产品：Atlas A2系列产品、Atlas A3系列产品、Ascend 950PR&950DT系列产品
 
 最小硬件配置：单卡32GB显存（推荐）
 
@@ -61,13 +61,13 @@ Triton-Ascend
 
 - Python版本选择：py3.10-py3.13 均可。
 
-- CANN版本选择：可以访问昇腾社区官网，根据其提供的<a href="https://www.hiascend.com/cann/download" style="text-decoration: none; color: #0066cc;">社区软件安装指引</a>完成CANN的安装与配置。建议下载安装 9.2.0 版本。
+- CANN版本选择：可以访问华为昇腾社区官网，根据其提供的<a href="https://www.hiascend.com/cann/download" style="text-decoration: none; color: #0066cc;">社区软件安装指引</a>完成CANN的安装与配置。建议下载安装 9.2.0 版本。
 
 - TorchNPU版本选择：当前配套的TorchNPU版本为2.10.0.post7。
 
-### 访问昇腾NPU
+### 访问华为昇腾NPU
 
-若需要访问昇腾NPU算力资源进行开发或测试，请进入HiDevLab平台的[HiDevLab-在线开发](https://hidevlab.huawei.com/online-develop-intro)页面申请并使用算力。
+若需要访问华为昇腾NPU算力资源进行开发或测试，请进入HiDevLab平台的[HiDevLab-在线开发](https://hidevlab.huawei.com/online-develop-intro)页面申请并使用算力。
 
 ### 快速安装
 

@@ -1,6 +1,6 @@
 # Installation Guide
 
-**Triton-Ascend** is an optimized version of Triton adapted for Huawei Ascend processors. It provides automatic kernel tuning, operator compilation and deployment capabilities. It supports Ascend Atlas A2 products/Atlas A3 products/Ascend 950PR&950DT products, is compatible with core Triton syntax, and has been deeply optimized for Ascend NPU features, including automatic parsing of kernel parameters, optimized memory access logic, and improved secure deployment mechanisms.
+**Triton-Ascend** is an optimized version of Triton adapted for Huawei Ascend processors. It provides automatic kernel tuning, operator compilation and deployment capabilities. It supports Atlas A2 products/Atlas A3 products/Ascend 950PR&950DT products, is compatible with core Triton syntax, and has been deeply optimized for Huawei Ascend NPU features, including automatic parsing of kernel parameters, optimized memory access logic, and improved secure deployment mechanisms.
 
 This guide instructs developers to install **Triton-Ascend** on **Ubuntu**, covering three installation methods: quick installation, source installation and container image installation. It also includes environment validation and common issue troubleshooting.
 
@@ -8,7 +8,7 @@ This guide instructs developers to install **Triton-Ascend** on **Ubuntu**, cove
 
 **Hardware Requirements**
 
-- Ascend products: Atlas A2 products/Atlas A3 products\Ascend 950PR&950DT products.
+- Huawei Ascend products: Atlas A2 products/Atlas A3 products\Ascend 950PR&950DT products.
 
 - NPU configuration: at least 32 GB of memory per card is recommended.
 
@@ -16,7 +16,7 @@ This guide instructs developers to install **Triton-Ascend** on **Ubuntu**, cove
 
 **Software Dependencies**
 
-Determine the CANN, Python, and TorchNPU software versions and install them. For the driver and firmware installation, refer to [CANN Quick Installation](https://www.hiascend.com/cann/download) on the official Ascend community website.
+Determine the CANN, Python, and TorchNPU software versions and install them. For the driver and firmware installation, refer to [CANN Quick Installation](https://www.hiascend.com/cann/download) on the official Huawei Ascend community website.
 
 - CANN version: 9.2.0
 - Python version: 3.11

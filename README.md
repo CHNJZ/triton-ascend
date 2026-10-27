@@ -15,7 +15,7 @@ Triton-Ascend
 </p>
 
 <p align="center">
-| <a href="https://triton-ascend.readthedocs.io/en/latest/"><b>Official Documentation</b></a> | <a href="https://www.hiascend.com/cn/developer/operator?tag=triton&tab=triton"><b>Operator Development User Journey</b></a> | <a href="https://docs.google.com/document/d/1qfat2wZtO2nfZb5FC2dWAcR6sTqgTNSvvh7MzTDoI4s/edit?pli=1&tab=t.0"><b>Community Meetings</b></a> | <a href="https://www.hiascend.com/"><b>About Ascend</b></a> |
+| <a href="https://triton-ascend.readthedocs.io/en/latest/"><b>Official Documentation</b></a> | <a href="https://www.hiascend.com/cn/developer/operator?tag=triton&tab=triton"><b>Operator Development User Journey</b></a> | <a href="https://docs.google.com/document/d/1qfat2wZtO2nfZb5FC2dWAcR6sTqgTNSvvh7MzTDoI4s/edit?pli=1&tab=t.0"><b>Community Meetings</b></a> | <a href="https://www.hiascend.com/"><b>About Huawei Ascend</b></a> |
 </p>
 
 ---
@@ -51,7 +51,7 @@ Triton-Ascend
 
 Supported operating systems: Linux (aarch64/x86_64)
 
-Supported Ascend products: Atlas A2 products/Atlas A3 products/Ascend 950PR&950DT products
+Supported Huawei Ascend products: Atlas A2 products/Atlas A3 products/Ascend 950PR&950DT products
 
 Minimum hardware configuration: single card with 32GB memory (recommended)
 
@@ -61,13 +61,13 @@ Determine and install the Python, CANN, and TorchNPU software versions. This ste
 
 - Python version selection: py3.10-py3.13 are all supported.
 
-- CANN version selection: You can visit the Ascend community website and follow the <a href="https://www.hiascend.com/cann/download" style="text-decoration: none; color: #0066cc;">community software installation guide</a> to complete the CANN installation and configuration. It is recommended to download and install version 9.2.0.
+- CANN version selection: You can visit the Huawei Ascend community website and follow the <a href="https://www.hiascend.com/cann/download" style="text-decoration: none; color: #0066cc;">community software installation guide</a> to complete the CANN installation and configuration. It is recommended to download and install version 9.2.0.
 
 - TorchNPU version selection: The currently bundled TorchNPU version is 2.10.0.post7.
 
-### Accessing Ascend NPU
+### Accessing Huawei Ascend NPU
 
-If you need to access Ascend NPU computing resources for development or testing, please visit the [HiDevLab - Online Development](https://hidevlab.huawei.com/online-develop-intro) page on the HiDevLab platform to apply for free access.
+If you need to access Huawei Ascend NPU computing resources for development or testing, please visit the [HiDevLab - Online Development](https://hidevlab.huawei.com/online-develop-intro) page on the HiDevLab platform to apply for free access.
 
 ### Quick Installation
 
