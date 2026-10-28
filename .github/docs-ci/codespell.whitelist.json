@@ -239,7 +239,6 @@
   "manylinux",
   "NVTX",
   "CUPTI",
-  "Volcengine",
   "shmem",
   "SHMEM",
   "msdebug",

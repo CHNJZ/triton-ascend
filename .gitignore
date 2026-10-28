@@ -95,6 +95,3 @@ docs/sg_execution_times.rst
 
 # macOS
 .DS_Store
-
-# Sphinx gettext compiled catalogs (generated during build)
-docs/locale/**/*.mo
