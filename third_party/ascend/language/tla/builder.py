@@ -37,6 +37,10 @@ __all__ = [
 
 def setup_unified_builder(main_builder, ascend_builder):
     """Set up a unified builder interface by attaching methods from specialized builders."""
+    # Register scope 'with' handlers here so TLA needs no build-time patch.
+    from .dispatch import register_with_dispatch
+
+    register_with_dispatch()
     # Only attach TLA-specific methods.  The cann setup_unified_builder owns
     # _ascend_builder and the shared methods; re-attaching or reassigning them
     # here would shadow the cann versions for every kernel.
