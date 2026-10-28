@@ -660,6 +660,28 @@ void init_tla_builder(py::module &&m) {
                  self.getBuilder().getBoolAttr(enable),
                  self.getBuilder().getI64IntegerAttr(idx));
            })
+      .def("create_tla_get_sub_block_idx",
+           [](TLABuilder &self) -> Value {
+             return self
+                 .create<hivm::GetSubBlockIdxOp>(self.getBuilder().getI64Type())
+                 .getResult();
+           })
+      .def("create_tla_sync_block_set",
+           [](TLABuilder &self, Attribute core, Attribute tpipe, Attribute pipe,
+              int64_t flag) {
+             self.create<hivm::SyncBlockSetOp>(
+                 cast<hivm::TCoreTypeAttr>(core), cast<hivm::PipeAttr>(tpipe),
+                 cast<hivm::PipeAttr>(pipe),
+                 OpFoldResult(self.getBuilder().getI64IntegerAttr(flag)));
+           })
+      .def("create_tla_sync_block_wait",
+           [](TLABuilder &self, Attribute core, Attribute tpipe, Attribute pipe,
+              int64_t flag) {
+             self.create<hivm::SyncBlockWaitOp>(
+                 cast<hivm::TCoreTypeAttr>(core), cast<hivm::PipeAttr>(tpipe),
+                 cast<hivm::PipeAttr>(pipe),
+                 OpFoldResult(self.getBuilder().getI64IntegerAttr(flag)));
+           })
       .def("create_tla_scalar_store",
            [](TLABuilder &self, Value value, Value dst, int64_t index) {
              auto offset = self.create<arith::ConstantIndexOp>(index);

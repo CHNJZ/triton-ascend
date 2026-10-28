@@ -75,10 +75,13 @@ def make_context():
     return ctx
 
 
-def compile_offline(fn, signature, constexprs, output_dir=None):
+def compile_offline(fn, signature, constexprs, output_dir=None, *, enable_tla_mode=None):
     """AST -> TTIR -> symbol_dce: front-end IR handed to npuir."""
     ctx = make_context()
-    module = ast_to_ttir(fn, signature, constexprs, ctx, Options())
+    options = Options()
+    if enable_tla_mode is not None:
+        options.enable_tla_mode = enable_tla_mode
+    module = ast_to_ttir(fn, signature, constexprs, ctx, options)
     if output_dir is not None:
         output_dir.mkdir(parents=True, exist_ok=True)
         (output_dir / "00_ast.mlir").write_text(str(module))
@@ -91,9 +94,10 @@ def compile_offline(fn, signature, constexprs, output_dir=None):
     return module, ctx
 
 
-def lower_offline(module, ctx, output_dir=None):
+def lower_offline(module, ctx, output_dir=None, *, enable_tla_mode=None):
     """Run full triton-ascend chain to ttadapter boundary: no TTIR leaks to npuir."""
-    return lower_ttir(module, ctx, output_dir=output_dir, enable_tla_mode=get_tla_mode())
+    mode = get_tla_mode() if enable_tla_mode is None else enable_tla_mode
+    return lower_ttir(module, ctx, output_dir=output_dir, enable_tla_mode=mode)
 
 
 def check_lowered_ir(text, loads, stores, buffers, extra=()):

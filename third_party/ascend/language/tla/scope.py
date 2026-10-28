@@ -24,13 +24,42 @@ compiler emits as an inline ``scope.scope`` carrying the core-mode markers; the
 bishengir ``outline-scope`` pass extracts the marked SIMD scope into the
 ``func.func`` + ``func.call`` that the HIVM stage consumes.
 
-``tla.scope.simd()`` and ``tla.scope.cube()`` are the entry points; each is a
+``tla.scope.simd()``, ``tla.scope.vector()`` and ``tla.scope.cube()`` are the entry points; each is a
 context-manager class (the core mode is fixed on the class), so the compiler
 dispatch table keys off the class object itself. Each class defines
 ``mlir_attrs``, the attribute set stamped on the emitted ``scope.scope``.
 """
 
-__all__ = ["scope", "simd", "cube"]
+from triton.language.core import builtin, tensor, int64, _unwrap_if_constexpr
+from .dma import _integer
+
+__all__ = ["scope", "simd", "cube", "vector", "sub_block_id", "sync_block_set", "sync_block_wait"]
+
+
+@builtin
+def sub_block_id(_semantic=None):
+    """Return the native sub-block index, e.g. 0/1 for mixed-kernel AIVs."""
+    return tensor(_semantic.builder.create_tla_get_sub_block_idx(), int64)
+
+
+def _sync_attrs(core, tpipe, pipe, semantic):
+    return (semantic.builder.parse_attr(f"#hivm.tcore_type<{_unwrap_if_constexpr(core)}>"),
+            semantic.builder.parse_attr(f"#hivm.pipe<{_unwrap_if_constexpr(tpipe)}>"),
+            semantic.builder.parse_attr(f"#hivm.pipe<{_unwrap_if_constexpr(pipe)}>"))
+
+
+@builtin
+def sync_block_set(core, tpipe, pipe, flag_id, _semantic=None):
+    """Emit native intra-block cross-core synchronization set."""
+    _semantic.builder.create_tla_sync_block_set(*_sync_attrs(core, tpipe, pipe, _semantic),
+                                                _integer(flag_id, "flag_id"))
+
+
+@builtin
+def sync_block_wait(core, tpipe, pipe, flag_id, _semantic=None):
+    """Wait for the matching native cross-core synchronization flag."""
+    _semantic.builder.create_tla_sync_block_wait(*_sync_attrs(core, tpipe, pipe, _semantic),
+                                                 _integer(flag_id, "flag_id"))
 
 
 class scope:
@@ -50,6 +79,10 @@ class scope:
     def mlir_attrs(cls, builder):
         """Attributes stamped on the emitted ``scope.scope`` op."""
         return {"hivm.tcore_type": builder.parse_attr("#hivm.tcore_type<VECTOR>")}
+
+
+class vector(scope):
+    """Vector-core scalar/DMA region, without starting a vector function."""
 
 
 class simd(scope):
@@ -80,7 +113,7 @@ class simd(scope):
 
 
 class cube(scope):
-    """``with tla.scope.cube():`` -- cube-core region (reserved; cube ops not yet exposed).
+    """``with tla.scope.cube():`` -- cube-core DMA and matrix-operation region.
 
     AIC scopes are not vector functions: only ``hivm.tcore_type<CUBE>`` is
     stamped, so outline-scope never extracts them into an AIV vector function.
@@ -96,3 +129,4 @@ class cube(scope):
 # ``tla.scope`` resolves as the namespace holding the fixed-core-mode classes.
 scope.simd = simd
 scope.cube = cube
+scope.vector = vector

@@ -2,12 +2,12 @@
 
 The Triton compiler patch merges ``TLA_WITH_DISPATCH`` into
 ``triton.compiler.code_generator.WITH_DISPATCH`` so that
-``with tla.scope.simd():`` is handled by ``handle_scope_with`` (inline
+``with tla.scope.simd()/vector()/cube():`` is handled by ``handle_scope_with`` (inline
 ``scope.scope`` emission; bishengir ``outline-scope`` extracts the VF).
 """
 
 from .code_generator import handle_scope_with
-from .scope import simd, cube
+from .scope import simd, cube, vector
 
 __all__ = ["TLA_WITH_DISPATCH"]
 
@@ -16,4 +16,5 @@ __all__ = ["TLA_WITH_DISPATCH"]
 TLA_WITH_DISPATCH = {
     simd: handle_scope_with,
     cube: handle_scope_with,
+    vector: handle_scope_with,
 }

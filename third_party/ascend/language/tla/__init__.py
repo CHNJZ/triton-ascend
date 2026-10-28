@@ -31,7 +31,7 @@ Exports: ``alloc_buffer``/``alloc`` (on-chip buffer + versions),
 """
 
 from .core import buffer, buffer_type, vector, vector_type
-from .scope import scope
+from .scope import scope, sub_block_id, sync_block_set, sync_block_wait
 from .alloc import alloc_buffer, alloc
 from .copy import copy
 from .dma import (
@@ -104,6 +104,9 @@ __all__ = [
 
     # core-mode scopes (scope.simd / scope.cube)
     "scope",
+    "sub_block_id",
+    "sync_block_set",
+    "sync_block_wait",
 
     # math helpers / diagnostics
     "math",

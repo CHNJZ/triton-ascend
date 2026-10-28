@@ -19,9 +19,10 @@
 # THE SOFTWARE.
 """Cube-core primitives for TLA (hivm.hir.mmadL1).
 
-``mmad`` computes ``C = A x B (+C)`` with A=(M,K)/B=(K,N) in L1 and C in L0C,
-mirroring tilelang ascend's L1-path ``gemm`` (only ``transpose_b`` is exposed;
-``transpose_a`` folds into the GM->L1 copy and is out of v1 scope).
+``mmad`` computes ``C = A x B (+C)`` with A/B in L1 and C in L0C.
+Operands may use logical 2-D shapes, or native 4-D NZ shapes
+``[column_blocks, row_blocks, row_inner, column_inner]``. The latter keeps
+explicit DMA layouts intact through the Affinity template pipeline.
 """
 from triton.language.core import builtin, _unwrap_if_constexpr
 from .core import buffer
@@ -31,23 +32,39 @@ __all__ = ["mmad"]
 
 
 @builtin
-def mmad(a, b, acc, transpose_b=False, clear_accum=False, unit_flag_ctrl=None, *, unit_flag_group_id=None,
+def mmad(a,
+         b,
+         acc,
+         transpose_b=False,
+         clear_accum=False,
+         unit_flag_ctrl=None,
+         *,
+         unit_flag_group_id=None,
          _semantic=None):
-    """L1 MMAD with an optional static UnitFlag mode paired with Fixpipe."""
+    """L1 MMAD over logical 2-D or physical NZ operands, paired with Fixpipe."""
     if not (isinstance(a, buffer) and isinstance(b, buffer) and isinstance(acc, buffer)):
         raise TypeError("tla.mmad expects tla.buffer operands for a, b, acc")
     if a.space != "l1" or b.space != "l1":
-        raise ValueError("tla.mmad a/b must be L1 buffers (fill via tla.copy(gm->l1))")
+        raise ValueError("tla.mmad a/b must be L1 buffers (fill via tla.nd2nz_gm_to_l1)")
     if acc.space != "l0c":
         raise ValueError("tla.mmad acc must be an L0C buffer")
     if a.dtype != b.dtype:
         raise ValueError("tla.mmad a and b must have the same element type")
-    if len(a.shape) != 2 or len(b.shape) != 2 or len(acc.shape) != 2:
-        raise ValueError("tla.mmad expects 2-D buffers (M,K)/(K,N)/(M,N)")
-    m, k = a.shape
-    k2, n = b.shape
-    if k != k2 or acc.shape != (m, n):
+    transpose_b = bool(_unwrap_if_constexpr(transpose_b))
+    ranks = (len(a.shape), len(b.shape), len(acc.shape))
+    if ranks == (2, 2, 2):
+        m, k = a.shape
+        k2, n = b.shape
+        acc_m, acc_n = acc.shape
+    elif ranks == (4, 4, 4):
+        m, k = a.shape[1] * a.shape[2], a.shape[0] * a.shape[3]
+        b_rows, b_cols = b.shape[1] * b.shape[2], b.shape[0] * b.shape[3]
+        k2, n = (b_cols, b_rows) if transpose_b else (b_rows, b_cols)
+        acc_m, acc_n = acc.shape[1] * acc.shape[2], acc.shape[0] * acc.shape[3]
+    else:
+        raise ValueError("tla.mmad expects all operands to be logical 2-D or physical 4-D NZ buffers")
+    if k != k2 or (acc_m, acc_n) != (m, n):
         raise ValueError("tla.mmad shape mismatch: a=(M,K), b=(K,N), acc=(M,N)")
-    _semantic.builder.create_hivm_mmadl1(a.handle, b.handle, acc.handle, bool(_unwrap_if_constexpr(clear_accum)), m, k,
-                                         n, bool(_unwrap_if_constexpr(transpose_b)),
+    _semantic.builder.create_hivm_mmadl1(a.handle, b.handle, acc.handle,
+                                         bool(_unwrap_if_constexpr(clear_accum)), m, k, n, transpose_b,
                                          _unit_flag_attrs(unit_flag_ctrl, unit_flag_group_id, _semantic))
