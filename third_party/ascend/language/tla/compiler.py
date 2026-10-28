@@ -40,7 +40,7 @@ from triton.compiler.code_generator import (
 
 
 def lower_ttir(module, context, compile_on_910_95=True, compile_mode="simd_simt_template", output_dir=None,
-               named_ops=True):
+               named_ops=True, enable_tla_mode=False):
     """Run the default non-distributed lowering prefix on a TLA TTIR module.
 
     A standard inliner prefix (mirroring ``make_ttir``) first resolves JIT
@@ -100,6 +100,8 @@ def lower_ttir(module, context, compile_on_910_95=True, compile_mode="simd_simt_
     if not module.verify():
         raise RuntimeError("triton_to_linalg produced invalid IR")
     _infer_kernel_mode(module, context)
+    if enable_tla_mode:
+        prepare_affinity_kernel(module, context)
     if output_dir is not None:
         (output_dir / "01_linalg.mlir").write_text(str(module))
     check_ttadapter(module)
@@ -111,6 +113,31 @@ def _kernel_entries(module):
     operations = []
     module.walk(operations.append)
     return [op for op in operations if op.get_name() == "func.func" and op.get_str_attr("sym_visibility") != "private"]
+
+
+def prepare_affinity_kernel(module, context):
+    """Supply the core contract consumed by the Affinity SplitMixKernel pass.
+
+    The regular backend infers these attributes. Affinity deliberately omits
+    that inference, so mix_mode alone leaves Cube work in an AIV module.
+    Preserve mixed work as MIX and let the backend split it; do not force a
+    mixed kernel onto AIC merely to make an AIC library symbol available.
+    """
+    from triton._C.libtriton.ascend import ir as ascend_ir
+    entries = _kernel_entries(module)
+    if len(entries) != 1:
+        raise ValueError("expected exactly one public func.func kernel entry")
+    entry = entries[0]
+    mode = entry.get_str_attr("mix_mode")
+    if mode not in ("aiv", "mix"):
+        raise ValueError(f"unsupported affinity kernel mix_mode: {mode!r}")
+    core = "MIX" if mode == "mix" else "AIV"
+    builder = ascend_ir.tla_builder(context, "")
+    module.set_attr("hivm.module_core_type", builder.parse_attr(f"#hivm.module_core_type<{core}>"))
+    builder.set_op_attr(entry, "hivm.func_core_type", builder.parse_attr(f"#hivm.func_core_type<{core}>"))
+    builder.set_op_attr(entry, "hivm.vf_mode", builder.parse_attr("#hivm.vf_mode<SIMD>"))
+    if not module.verify():
+        raise ValueError("invalid affinity core attributes")
 
 
 def _infer_kernel_mode(module, context):

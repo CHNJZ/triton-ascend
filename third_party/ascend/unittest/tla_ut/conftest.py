@@ -58,5 +58,6 @@ def pytest_collection_modifyitems(config, items):
     stage = os.environ.get("TLA_TEST_STAGE", "all")
     enabled = {"test_compile": do_compile, "test_run": do_run}
     for item in items:
-        if not enabled.get(item.name, True):
+        name = getattr(item, "originalname", None) or item.name.split("[", 1)[0]
+        if not enabled.get(name, True):
             item.add_marker(pytest.mark.skip(reason=f"{item.name} skipped (TLA_TEST_STAGE={stage})"))

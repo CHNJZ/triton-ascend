@@ -440,6 +440,9 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
             print(f"[DEBUG] cmd list: {shlex.join(cmd)}")
 
         pm.run(mod, 'ttir_to_linalg')
+        if opt.enable_tla_mode:
+            from triton.language.extra.tla.compiler import prepare_affinity_kernel
+            prepare_affinity_kernel(mod, mod.context)
         _adjust_metadata_by_module_result(mod, metadata, opt, enable_mixed_cv=enable_mixed_cv,
                                           disable_auto_inject_block_sync=disable_auto_inject_block_sync,
                                           set_workspace_multibuffer=set_workspace_multibuffer)

@@ -555,7 +555,8 @@ static bool collectCubeRequirements(ModuleOp moduleOp) {
   });
   moduleOp.walk([&](Operation *op) {
     if (isa<triton::DotOp, triton::DotScaledOp, triton::ascend::DotOp,
-            hfusion::Conv1DOp, hfusion::Conv2DOp>(op)) {
+            hfusion::Conv1DOp, hfusion::Conv2DOp, hivm::MmadL1Op, hivm::ND2NZOp,
+            hivm::FixpipeOp, hivm::L12UBOp, hivm::L12BTOp, hivm::L12L0Op>(op)) {
       existDot = true;
       return WalkResult::interrupt();
     }

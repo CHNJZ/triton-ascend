@@ -25,12 +25,15 @@ mirroring tilelang ascend's L1-path ``gemm`` (only ``transpose_b`` is exposed;
 """
 from triton.language.core import builtin, _unwrap_if_constexpr
 from .core import buffer
+from .dma import _unit_flag_attrs
 
 __all__ = ["mmad"]
 
 
 @builtin
-def mmad(a, b, acc, transpose_b=False, clear_accum=False, _semantic=None):
+def mmad(a, b, acc, transpose_b=False, clear_accum=False, unit_flag_ctrl=None, *, unit_flag_group_id=None,
+         _semantic=None):
+    """L1 MMAD with an optional static UnitFlag mode paired with Fixpipe."""
     if not (isinstance(a, buffer) and isinstance(b, buffer) and isinstance(acc, buffer)):
         raise TypeError("tla.mmad expects tla.buffer operands for a, b, acc")
     if a.space != "l1" or b.space != "l1":
@@ -46,4 +49,5 @@ def mmad(a, b, acc, transpose_b=False, clear_accum=False, _semantic=None):
     if k != k2 or acc.shape != (m, n):
         raise ValueError("tla.mmad shape mismatch: a=(M,K), b=(K,N), acc=(M,N)")
     _semantic.builder.create_hivm_mmadl1(a.handle, b.handle, acc.handle, bool(_unwrap_if_constexpr(clear_accum)), m, k,
-                                         n, bool(_unwrap_if_constexpr(transpose_b)))
+                                         n, bool(_unwrap_if_constexpr(transpose_b)),
+                                         _unit_flag_attrs(unit_flag_ctrl, unit_flag_group_id, _semantic))

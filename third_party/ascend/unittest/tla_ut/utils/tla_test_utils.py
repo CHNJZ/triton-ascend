@@ -14,9 +14,20 @@ otherwise ir only.
 import os
 from pathlib import Path
 
+import pytest
+import torch
+
 from triton.language.extra.tla.compiler import ast_to_ttir, lower_ttir
 from triton._C.libtriton import ir, buffer_ir, passes
 from triton._C.libtriton.ascend import ir as ascend_ir
+
+
+def get_tla_mode():
+    """Select the backend pipeline; default to the regular flow for validation."""
+    value = os.environ.get("TLA_ENABLE_MODE", "false").strip().lower()
+    if value not in ("false", "true", "0", "1"):
+        raise ValueError("TLA_ENABLE_MODE must be false/true or 0/1")
+    return value in ("true", "1")
 
 
 class Options:
@@ -29,6 +40,7 @@ class Options:
     debug = False
     sanitize_overflow = True
     arch = "Ascend910_9589"
+    enable_tla_mode = get_tla_mode()
     supported_fp8_dtypes = ("fp8e5", "fp8e4nv", "fp8e4b8", "fp8e4b15", "fp8e5b16")
 
 
@@ -81,7 +93,7 @@ def compile_offline(fn, signature, constexprs, output_dir=None):
 
 def lower_offline(module, ctx, output_dir=None):
     """Run full triton-ascend chain to ttadapter boundary: no TTIR leaks to npuir."""
-    return lower_ttir(module, ctx, output_dir=output_dir)
+    return lower_ttir(module, ctx, output_dir=output_dir, enable_tla_mode=get_tla_mode())
 
 
 def check_lowered_ir(text, loads, stores, buffers, extra=()):
@@ -109,3 +121,61 @@ def check_compile_artifacts():
         if artifacts:
             return [str(p) for p in artifacts[:5]]
     return []
+
+
+def check_kernel_binary(kernel):
+    """Verify the binary and artifact belonging to this exact specialization."""
+    binary = kernel.asm.get("npubin")
+    assert isinstance(binary, bytes) and binary, "kernel did not produce an NPU binary"
+    paths = [Path(path) for name, path in kernel.metadata_group.items() if name.endswith((".npubin", ".o"))]
+    assert paths, "kernel metadata contains no .npubin/.o artifact"
+    assert any(path.is_file() and path.read_bytes() == binary
+               for path in paths), ("generated binary is missing or differs from this kernel's cache artifact")
+    print("COMPILE PASS:", kernel.name, "->", ", ".join(str(path) for path in paths))
+
+
+def matrix(cases):
+    return pytest.mark.parametrize("case", cases, ids=[case["name"] for case in cases])
+
+
+def selected(cases):
+    name = os.environ.get("TLA_TEST_CASE")
+    result = [case for case in cases if name is None or case["name"] == name]
+    if not result:
+        raise ValueError(f"unknown TLA_TEST_CASE={name!r}")
+    return result
+
+
+def lowered(fn, signature, constants, output_dir=None):
+    aliases = {"*int8": "*i8", "*int32": "*i32", "*uint32": "*u32"}
+    signature = {name: aliases.get(ty, ty) if isinstance(ty, str) else ty for name, ty in signature.items()}
+    if output_dir is not None:
+        output_dir = Path(output_dir)
+    module, ctx = compile_offline(fn, signature, constants, output_dir=output_dir)
+    text = str(lower_offline(module, ctx, output_dir=output_dir))
+    assert "!tt.ptr" not in text and "tt.store" not in text
+    if get_tla_mode():
+        core = "MIX" if 'mix_mode = "mix"' in text else "AIV"
+        assert f"hivm.module_core_type = #hivm.module_core_type<{core}>" in text
+        assert f"hivm.func_core_type = #hivm.func_core_type<{core}>" in text
+    return text
+
+
+def exact(actual, expected):
+    torch.testing.assert_close(actual.cpu(), expected.cpu(), rtol=0, atol=0)
+
+
+def check_case_binary(kernel):
+    assert kernel.metadata.enable_tla_mode == get_tla_mode()
+    check_kernel_binary(kernel)
+
+
+def pattern(rows, cols, dtype):
+    return (((torch.arange(rows * cols).reshape(rows, cols) * 7) % 43) - 21).to(dtype)
+
+
+def pack_nz(nd):
+    """L1 NZ is [N/C0, M/16, 16, C0]; half/bfloat16 use C0=16."""
+    m, n = nd.shape
+    c0 = 32 // nd.element_size()
+    return nd.reshape(m // 16, 16, n // c0, c0).permute(2, 0, 1, 3).contiguous()

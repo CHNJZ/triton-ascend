@@ -20,28 +20,27 @@
 """Buffer-to-buffer DMA. No tensor materialization or bind_buffer annotation."""
 from triton.language.core import builtin
 from .core import buffer
-
-
-def _fixpipe_dma_mode(dst):
-    # Match InsertLoadStoreForMixCV::getInsertedFixpipeDmaMode: a 2D ND dst
-    # uses NZ2ND (drop NZ to ND); a 4D fractal dst keeps NZ (NZ2NZ).
-    # TODO: Replace it with explicit fixpipe API with mode.
-    return "nz2nd" if len(dst.shape) == 2 else "normal"
+from . import dma
 
 
 @builtin
 def copy(src, dst, _semantic=None):
     if not isinstance(src, buffer) or not isinstance(dst, buffer):
         raise TypeError("tla.copy expects two tla.buffer operands; pointer/tensor arguments are unsupported")
-    if src.shape != dst.shape or src.dtype != dst.dtype:
-        raise ValueError("DMA source and destination must have identical shape and element type")
     if (src.space, dst.space) == ("gm", "ub"):
-        _semantic.builder.create_hivm_load(src.handle, dst.handle)
+        dma.load_gm_to_ub(src, dst, _semantic=_semantic)
     elif (src.space, dst.space) == ("ub", "gm"):
-        _semantic.builder.create_hivm_store(src.handle, dst.handle)
+        dma.store_ub_to_gm(src, dst, _semantic=_semantic)
     elif (src.space, dst.space) == ("gm", "l1"):
-        _semantic.builder.create_hivm_nd2nz(src.handle, dst.handle)
+        dma.nd2nz_gm_to_l1(src, dst, _semantic=_semantic)
     elif src.space == "l0c":
-        _semantic.builder.create_hivm_fixpipe(src.handle, dst.handle, _fixpipe_dma_mode(dst))
+        mode = dma.FixpipeDMAMode.NZ2ND if len(dst.shape) == 2 else dma.FixpipeDMAMode.NZ2NZ
+        dma.fixpipe_l0c_to_dst(src, dst, dma_mode=mode, _semantic=_semantic)
+    elif (src.space, dst.space) == ("ub", "l1"):
+        dma.copy_ub_to_l1(src, dst, _semantic=_semantic)
+    elif (src.space, dst.space) == ("l1", "ub"):
+        dma.copy_l1_to_ub(src, dst, _semantic=_semantic)
+    elif (src.space, dst.space) == ("l1", "bt"):
+        dma.copy_l1_to_bt(src, dst, _semantic=_semantic)
     else:
         raise ValueError(f"tla.copy unsupported space pair {(src.space, dst.space)}")

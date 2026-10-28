@@ -42,7 +42,7 @@ class buffer_type(tl.base_type):
         self.shape = _shape(shape)
         self.element_ty = tl._unwrap_if_constexpr(dtype)
         self.space = tl._unwrap_if_constexpr(space)
-        if self.space not in ("gm", "ub", "l1", "l0a", "l0b", "l0c"):
+        if self.space not in ("gm", "ub", "l1", "l0a", "l0b", "l0c", "bt", "fb"):
             raise ValueError(f"unsupported buffer space: {self.space}")
         if strides is None:
             strides = _row_major_strides(self.shape)
