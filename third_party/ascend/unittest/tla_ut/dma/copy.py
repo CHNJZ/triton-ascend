@@ -21,16 +21,15 @@ CONFIGS = [
     dict(c, family="generic", op="copy", dependencies=["load_gm_to_ub", "store_ub_to_gm"]) for c in GENERIC_CASES
 ]
 
-ROUTE_CASES = [{
-    'name': 'fp16_16x16_logical2d', 'dtype': 'fp16', 'route': 'ub_to_l1', 'm': 16, 'n': 16, 'physical': False
-}, {'name': 'fp16_16x16_nz4d', 'dtype': 'fp16', 'route': 'ub_to_l1', 'm': 16, 'n': 16, 'physical': True},
+ROUTE_CASES = [{'name': 'fp16_16x32_nz4d', 'dtype': 'fp16', 'route': 'ub_to_l1', 'm': 16, 'n': 32, 'physical': True},
+               {'name': 'fp16_16x16_nz4d', 'dtype': 'fp16', 'route': 'ub_to_l1', 'm': 16, 'n': 16, 'physical': True},
                {'name': 'fp16_32x32_nz4d', 'dtype': 'fp16', 'route': 'ub_to_l1', 'm': 32, 'n': 32, 'physical': True}]
 CONFIGS += [
     dict(c, name="ub_to_l1_" + c["name"], family="ub_to_l1", op="copy_ub_to_l1",
          dependencies=["load_gm_to_ub", "copy_l1_to_ub", "store_ub_to_gm"]) for c in ROUTE_CASES
 ]
 
-ROUTE_CASES = [{'name': 'fp16_16x16_logical2d', 'dtype': 'fp16', 'route': 'load', 'm': 16, 'n': 16, 'physical': False},
+ROUTE_CASES = [{'name': 'fp16_16x32_nz4d', 'dtype': 'fp16', 'route': 'load', 'm': 16, 'n': 32, 'physical': True},
                {'name': 'fp16_16x16_nz4d', 'dtype': 'fp16', 'route': 'load', 'm': 16, 'n': 16, 'physical': True},
                {'name': 'fp16_32x32_nz4d', 'dtype': 'fp16', 'route': 'load', 'm': 32, 'n': 32, 'physical': True},
                {'name': 'fp32_16x16_nz4d', 'dtype': 'fp32', 'route': 'load', 'm': 16, 'n': 16, 'physical': True}]
@@ -39,26 +38,22 @@ CONFIGS += [
          dependencies=["load_gm_to_l1", "store_ub_to_gm"]) for c in ROUTE_CASES
 ]
 
-ROUTE_CASES = [
-    dict(name=target + ("_transpose" if transpose else "_normal"), target=target, transpose=transpose,
-         compile_kind="allocation_diagnostic") for target in ("l0a", "l0b") for transpose in (False, True)
-]
-CONFIGS += [
-    dict(c, name="l12l0_" + c["name"], family="l12l0", op="copy_l1_to_l0", dependencies=["load_gm_to_l1"])
-    for c in ROUTE_CASES
-]
-
-ROUTE_CASES = [
-    dict(name=dtype, dtype=dtype, target="bt", compile_kind="allocation_diagnostic") for dtype in ("fp16", "fp32")
-]
-CONFIGS += [
-    dict(c, name="l12bt_" + c["name"], family="l12bt", op="copy_l1_to_bt", dependencies=["load_gm_to_l1"])
-    for c in ROUTE_CASES
-]
-
 ROUTE_CASES = [dict(name="unsupported", expected_diagnostic=True)]
 CONFIGS += [
     dict(c, name="l12fb_" + c["name"], family="l12fb", op="copy_l1_to_fb", dependencies=[]) for c in ROUTE_CASES
+]
+
+# Indirect coverage: MMAD's template owns L0A/L0B/BiasBUF and performs the
+# transfers internally. These do not compile the standalone DMA operations.
+CONFIGS += [
+    dict(name="l12l0_indirect_" + name, family="indirect_mmad", op="l12l0_indirect", transpose_a=ta, transpose_b=tb,
+         bias_dtype=None, coverage="mmad_template", dependencies=["nd2nz_gm_to_l1", "mmad", "fixpipe_l0c_to_dst"])
+    for name, ta, tb in (("nn", False, False), ("ta", True, False), ("tb", False, True), ("ta_tb", True, True))
+]
+CONFIGS += [
+    dict(name="l12bt_indirect_" + dtype, family="indirect_mmad", op="l12bt_indirect", transpose_a=False,
+         transpose_b=False, bias_dtype=dtype, coverage="mmad_template",
+         dependencies=["nd2nz_gm_to_l1", "load_gm_to_l1", "mmad", "fixpipe_l0c_to_dst"]) for dtype in ("fp16", "fp32")
 ]
 
 
@@ -125,21 +120,28 @@ def _l1_roundtrip(X, Y, ROUTE: tl.constexpr, DTYPE: tl.constexpr, M: tl.constexp
                   PHYSICAL: tl.constexpr, CACHE: tl.constexpr):
     c0: tl.constexpr = 8 if DTYPE == tl.float32 else 16
     shape: tl.constexpr = (N // c0, M // 16, 16, c0) if PHYSICAL else (M, N)
-    l1 = tla.alloc(shape, DTYPE, space="l1", is_mem_unique=True)
     out = tla.alloc((M, N), DTYPE, is_mem_unique=True)
-    if ROUTE == "nd2nz":
+    if ROUTE == "ub_to_l1":
+        # L1 is shared by the Vector producer and Cube consumer. Keep the
+        # temporary UB local to Vector so MIX splitting does not clone it.
+        l1 = tla.alloc(shape, DTYPE, space="l1", is_mem_unique=True)
+        with tla.scope.vector():
+            ub = tla.alloc(shape, DTYPE, is_mem_unique=True)
+            tla.load_gm_to_ub(tla.view(X, shape), ub)
+            tla.copy_ub_to_l1(ub, l1)
         with tla.scope.cube():
-            tla.nd2nz_gm_to_l1(tla.view(X, (M, N)), l1, l2_cache_ctrl=CACHE)
-    elif ROUTE == "ub_to_l1":
-        ub = tla.alloc(shape, DTYPE, is_mem_unique=True)
-        tla.load_gm_to_ub(tla.view(X, shape), ub)
-        tla.copy_ub_to_l1(ub, l1)
+            tla.copy_l1_to_ub(l1, out)
     else:
+        # Cube-only buffers and their users belong to the same region.
         with tla.scope.cube():
-            tla.load_gm_to_l1(tla.view(X, shape), l1)
-    with tla.scope.cube():
-        tla.copy_l1_to_ub(l1, out)
-    tla.store_ub_to_gm(out, tla.view(Y, (M, N)))
+            l1 = tla.alloc(shape, DTYPE, space="l1", is_mem_unique=True)
+            if ROUTE == "nd2nz":
+                tla.nd2nz_gm_to_l1(tla.view(X, (M, N)), l1, l2_cache_ctrl=CACHE)
+            else:
+                tla.load_gm_to_l1(tla.view(X, shape), l1)
+            tla.copy_l1_to_ub(l1, out)
+    with tla.scope.vector():
+        tla.store_ub_to_gm(out, tla.view(Y, (M, N)))
 
 
 def _l1_args(case):
@@ -226,58 +228,96 @@ def _generic_run(case):
 
 
 @triton.jit
-def native_copy(src, dst, TARGET: tl.constexpr, TRANSPOSE: tl.constexpr):
-    if TARGET == "bt":
-        tla.copy_l1_to_bt(src, dst)
-    else:
-        tla.copy_l1_to_l0(src, dst, is_transpose=TRANSPOSE, k_part_idx=0, k_part=64, k_part_ceil=64, k_part_loop=1,
-                          k_part_actual=64, m=16)
-
-
-def _native_ir(case, output_dir=None):
-    dtype = tl.float32 if case.get("dtype") == "fp32" else tl.float16
-    text = lowered(
-        native_copy,
-        {"src": tla.buffer_type((16, 64), dtype, "l1"), "dst": tla.buffer_type((16, 64), dtype, case["target"])},
-        dict(TARGET=case["target"], TRANSPOSE=case.get("transpose", False)), output_dir)
-    assert "hivm.hir." + ("l12bt" if case["target"] == "bt" else "l12l0") + " " in text
-    if case["target"] != "bt":
-        assert "k_part_actual = 64" in text
-        if case["transpose"]:
-            assert "is_transposed = true" in text
-        else:
-            assert "is_transposed = true" not in text
-    else:
-        assert "n = %c64" in text and "arith.constant 64 : index" in text and "biasbuf" in text
-    print("IR PASS:", case["name"])
-
-
-@triton.jit
-def allocation_probe(X, Y, TARGET: tl.constexpr, TRANSPOSE: tl.constexpr, DTYPE: tl.constexpr):
-    src = tla.alloc((16, 64), DTYPE, space="l1", is_mem_unique=True)
-    dst = tla.alloc((16, 64), DTYPE, space=TARGET, is_mem_unique=True)
+def indirect_mmad_pipeline(A, B, Bias, Y, TRANSPOSE_A: tl.constexpr, TRANSPOSE_B: tl.constexpr,
+                           BIAS_DTYPE: tl.constexpr, WITH_BIAS: tl.constexpr, M: tl.constexpr, N: tl.constexpr,
+                           K: tl.constexpr):
+    a_rows: tl.constexpr = K if TRANSPOSE_A else M
+    a_cols: tl.constexpr = M if TRANSPOSE_A else K
+    b_rows: tl.constexpr = N if TRANSPOSE_B else K
+    b_cols: tl.constexpr = K if TRANSPOSE_B else N
     with tla.scope.cube():
-        tla.load_gm_to_l1(tla.view(X, (16, 64)), src)
-        native_copy(src, dst, TARGET, TRANSPOSE)
-    tl.store(Y, 1)
+        a_l1 = tla.alloc((a_cols // 16, a_rows // 16, 16, 16), tl.float16, space="l1", is_mem_unique=True)
+        b_l1 = tla.alloc((b_cols // 16, b_rows // 16, 16, 16), tl.float16, space="l1", is_mem_unique=True)
+        acc = tla.alloc((N // 16, M // 16, 16, 16), tl.float32, space="l0c", is_mem_unique=True)
+        tla.nd2nz_gm_to_l1(tla.view(A, (a_rows, a_cols)), a_l1)
+        tla.nd2nz_gm_to_l1(tla.view(B, (b_rows, b_cols)), b_l1)
+        if WITH_BIAS:
+            bias_l1 = tla.alloc((1, 1, 1, N), BIAS_DTYPE, space="l1", is_mem_unique=True)
+            tla.load_gm_to_l1(tla.view(Bias, (1, 1, 1, N)), bias_l1)
+            tla.cube.mmad(a_l1, b_l1, acc, clear_accum=True, transpose_a=TRANSPOSE_A, transpose_b=TRANSPOSE_B,
+                          per_channel_bias=bias_l1)
+        else:
+            tla.cube.mmad(a_l1, b_l1, acc, clear_accum=True, transpose_a=TRANSPOSE_A, transpose_b=TRANSPOSE_B)
+        tla.fixpipe_l0c_to_dst(acc, tla.view(Y, (M, N)), dma_mode=tla.FixpipeDMAMode.NZ2ND)
 
 
-def _native_compile(case):
-    dtype = torch.float32 if case.get("dtype") == "fp32" else torch.float16
-    x = torch.ones((16, 64), dtype=dtype, device="npu")
-    y = torch.empty(1, dtype=torch.int32, device="npu")
-    kernel = allocation_probe.warmup(x, y, TARGET=case["target"], TRANSPOSE=case.get("transpose", False),
-                                     DTYPE=tl.float32 if dtype == torch.float32 else tl.float16, grid=(1, ),
-                                     enable_tla_mode=get_tla_mode())
-    check_case_binary(kernel)
-    # A successful constant-store kernel is insufficient evidence: reject DCE.
-    name = "l12bt" if case["target"] == "bt" else "l12l0"
-    if name not in kernel.asm.get("llir", ""):
-        pytest.skip("Allocation diagnostic produced no inspectable retained " + name + " LLVM operation")
+def _indirect_constants(case):
+    return dict(TRANSPOSE_A=case["transpose_a"], TRANSPOSE_B=case["transpose_b"],
+                BIAS_DTYPE=tl.float32 if case["bias_dtype"] == "fp32" else tl.float16, WITH_BIAS=case["bias_dtype"]
+                is not None, M=16, N=64, K=32)
 
 
-def _native_run(case):
-    pytest.skip("No public L0A/L0B/BiasBUF consumer; allocation probe is never launched or counted as precision PASS")
+def _indirect_ir(case, output_dir=None):
+    text = lowered(indirect_mmad_pipeline,
+                   {"A": "*fp16", "B": "*fp16", "Bias": "*" + (case["bias_dtype"] or "fp16"), "Y": "*fp32"},
+                   _indirect_constants(case), output_dir)
+    assert text.count("hivm.hir.nd2nz ") == 2
+    assert text.count("hivm.hir.load ") == int(case["bias_dtype"] is not None)
+    assert text.count("hivm.hir.mmadL1 ") == 1
+    assert text.count("hivm.hir.fixpipe ") == 1
+    assert ("a_transpose" in text) == case["transpose_a"]
+    assert ("b_transpose" in text) == case["transpose_b"]
+    for space in ("ca", "cb", "biasbuf"):
+        assert "address_space<" + space + ">" not in text
+    for standalone in ("l12l0", "l12bt", "mmadL0"):
+        assert "hivm.hir." + standalone + " " not in text
+    allocs = [line for line in text.splitlines() if "memref.alloc(" in line]
+    assert len(allocs) == 3 + int(case["bias_dtype"] is not None)
+    assert all("cbuf" in line or "address_space<cc>" in line for line in allocs)
+    import re
+    consumer = next(line for line in text.splitlines() if "hivm.hir.mmadL1 " in line)
+    inputs = re.search(r"\bins\(([^:]+):", consumer).group(1).strip().split(", ")
+    assert len(inputs) == 6 + int(case["bias_dtype"] is not None)
+    if case["bias_dtype"] is not None:
+        bias_dst = re.search(r"hivm\.hir\.load .*?outs\((%[\w]+)", text).group(1)
+        assert inputs[-1] == bias_dst
+    print("IR PASS: indirect L1/L0/BT transfers inside MMAD template:", case["name"])
+
+
+def _indirect_launch(case, compile_only=False):
+    generator = torch.Generator().manual_seed(42)
+    constants = _indirect_constants(case)
+    m, n, k = constants["M"], constants["N"], constants["K"]
+    a_shape = (k, m) if case["transpose_a"] else (m, k)
+    b_shape = (n, k) if case["transpose_b"] else (k, n)
+    a_cpu = (torch.randn(a_shape, generator=generator) * 2).half()
+    b_cpu = (torch.randn(b_shape, generator=generator) * 2).half()
+    bias_dtype = torch.float32 if case["bias_dtype"] == "fp32" else torch.float16
+    bias_cpu = (torch.arange(n, dtype=torch.float32) / 4 - 2).to(bias_dtype)
+    a, b, bias = a_cpu.npu(), b_cpu.npu(), bias_cpu.npu()
+    out = torch.full((m, n), float("nan"), dtype=torch.float32, device="npu")
+    options = dict(enable_tla_mode=get_tla_mode(), **constants)
+    if compile_only:
+        return indirect_mmad_pipeline.warmup(a, b, bias, out, grid=(1, ), **options), None, None
+    kernel = indirect_mmad_pipeline[(1, )](a, b, bias, out, **options)
+    torch.npu.synchronize()
+    lhs = a_cpu.float().T if case["transpose_a"] else a_cpu.float()
+    rhs = b_cpu.float().T if case["transpose_b"] else b_cpu.float()
+    expected = lhs @ rhs
+    if case["bias_dtype"] is not None:
+        expected += bias_cpu.float()[None, :]
+    return kernel, out.cpu(), expected
+
+
+def _indirect_compile(case):
+    check_case_binary(_indirect_launch(case, True)[0])
+
+
+def _indirect_run(case):
+    _, actual, expected = _indirect_launch(case)
+    assert torch.isfinite(actual).all()
+    torch.testing.assert_close(actual, expected, rtol=1e-3, atol=3e-2)
+    print("ACCURACY PASS:", case["name"])
 
 
 @matrix(CONFIGS)
@@ -287,10 +327,13 @@ def test_ir(case, output_dir=None):
         _generic_ir(case, output_dir)
     elif family in ("ub_to_l1", "l12ub"):
         l1_ir_case(case, output_dir)
-    elif family in ("l12l0", "l12bt"):
-        _native_ir(case, output_dir)
-        if family == "l12l0":
+    elif family == "indirect_mmad":
+        _indirect_ir(case, output_dir)
+        if case["bias_dtype"] is None:
+            _check_ir_route("l1_l0", "l1", "l0a", "l12l0")
             _check_invalid_route("actual_batch", "l1", "l0a", "actual_batch has no field")
+        else:
+            _check_ir_route("l1_bt", "l1", "bt", "l12bt")
     else:
         _check_invalid_route("l1_fb", "l1", "fb", "has no L1->FixBUF DMA operation")
         print("EXPECTED DIAGNOSTIC PASS: L1->FixBUF remains unsupported")
@@ -303,8 +346,8 @@ def test_compile(case):
         _generic_compile(case)
     elif family in ("ub_to_l1", "l12ub"):
         l1_compile_case(case)
-    elif family in ("l12l0", "l12bt"):
-        _native_compile(case)
+    elif family == "indirect_mmad":
+        _indirect_compile(case)
     else:
         pytest.skip("copy_l1_to_fb has no mapped HIVM operation")
 
@@ -316,8 +359,8 @@ def test_run(case):
         _generic_run(case)
     elif family in ("ub_to_l1", "l12ub"):
         l1_run_case(case)
-    elif family in ("l12l0", "l12bt"):
-        _native_run(case)
+    elif family == "indirect_mmad":
+        _indirect_run(case)
     else:
         pytest.skip("copy_l1_to_fb has no mapped HIVM operation")
 
@@ -328,9 +371,15 @@ def main():
         if do_ir:
             test_ir(case)
         if do_compile:
-            test_compile(case)
+            try:
+                test_compile(case)
+            except pytest.skip.Exception as exc:
+                print("COMPILE SKIP:", case["name"], str(exc))
         if do_run:
-            test_run(case)
+            try:
+                test_run(case)
+            except pytest.skip.Exception as exc:
+                print("ACCURACY SKIP:", case["name"], str(exc))
 
 
 if __name__ == "__main__":

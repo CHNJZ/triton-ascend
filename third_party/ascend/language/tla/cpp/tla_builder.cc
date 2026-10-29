@@ -776,7 +776,8 @@ void init_tla_builder(py::module &&m) {
           "create_hivm_mmadl1",
           [](TLABuilder &self, Value a, Value b, Value c, bool init_condition,
              int64_t real_m, int64_t real_k, int64_t real_n, bool transpose_b,
-             const py::dict &attrs) {
+             const py::dict &attrs, std::optional<Value> bias,
+             bool transpose_a) {
             auto &builder = self.getBuilder();
             auto loc = self.getLastLoc();
             auto init = builder.create<arith::ConstantOp>(
@@ -784,10 +785,12 @@ void init_tla_builder(py::module &&m) {
             auto m = builder.create<arith::ConstantIndexOp>(loc, real_m);
             auto k = builder.create<arith::ConstantIndexOp>(loc, real_k);
             auto n = builder.create<arith::ConstantIndexOp>(loc, real_n);
+            auto aTrans = transpose_a ? builder.getUnitAttr() : UnitAttr{};
             auto bTrans = transpose_b ? builder.getUnitAttr() : UnitAttr{};
             auto op = self.create<hivm::MmadL1Op>(
                 TypeRange{}, a, b, init, m, k, n, c,
-                /*per_channel_bias=*/Value{}, /*a_transpose=*/UnitAttr{},
+                /*per_channel_bias=*/bias.value_or(Value{}),
+                /*a_transpose=*/aTrans,
                 /*b_transpose=*/bTrans, /*enable_HF32=*/UnitAttr{},
                 /*enable_I4=*/UnitAttr{});
             for (auto item : attrs)
@@ -796,7 +799,8 @@ void init_tla_builder(py::module &&m) {
           },
           py::arg("a"), py::arg("b"), py::arg("c"), py::arg("init_condition"),
           py::arg("real_m"), py::arg("real_k"), py::arg("real_n"),
-          py::arg("transpose_b"), py::arg("attrs") = py::dict())
+          py::arg("transpose_b"), py::arg("attrs") = py::dict(),
+          py::arg("bias") = py::none(), py::arg("transpose_a") = false)
       .def("create_scope_op",
            [](TLABuilder &self, py::dict &scopeAttrs,
               std::vector<Type> resultTypes) -> OpState {

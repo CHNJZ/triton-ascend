@@ -12,23 +12,61 @@ from dma.copy import l1_ir_case, l1_compile_case, l1_run_case
 
 OP = 'nd2nz_gm_to_l1'
 DEPENDENCIES = ["copy_l1_to_ub", "store_ub_to_gm"]
-CONFIGS = [{'name': 'fp16_16x16_logical2d', 'dtype': 'fp16', 'route': 'nd2nz', 'm': 16, 'n': 16, 'physical': False},
-           {'name': 'fp16_16x32_logical2d', 'dtype': 'fp16', 'route': 'nd2nz', 'm': 16, 'n': 32, 'physical': False}, {
-               'name': 'fp16_32x32_nz4d_cacheNone', 'dtype': 'fp16', 'route': 'nd2nz', 'm': 32, 'n': 32, 'physical':
-               True, 'cache': None
-           }, {
-               'name': 'fp16_32x32_nz4d_cache0', 'dtype': 'fp16', 'route': 'nd2nz', 'm': 32, 'n': 32, 'physical': True,
-               'cache': 0
-           }, {
-               'name': 'fp16_32x32_nz4d_cache1', 'dtype': 'fp16', 'route': 'nd2nz', 'm': 32, 'n': 32, 'physical': True,
-               'cache': 1
-           }, {
-               'name': 'fp16_32x32_nz4d_cache2', 'dtype': 'fp16', 'route': 'nd2nz', 'm': 32, 'n': 32, 'physical': True,
-               'cache': 2
-           }, {
-               'name': 'fp16_32x32_nz4d_cache3', 'dtype': 'fp16', 'route': 'nd2nz', 'm': 32, 'n': 32, 'physical': True,
-               'cache': 3
-           }]
+CONFIGS = [{
+    'name': 'fp16_16x16_nz4d',
+    'dtype': 'fp16',
+    'route': 'nd2nz',
+    'm': 16,
+    'n': 16,
+    'physical': True
+}, {
+    'name': 'fp16_16x32_nz4d',
+    'dtype': 'fp16',
+    'route': 'nd2nz',
+    'm': 16,
+    'n': 32,
+    'physical': True
+}, {
+    'name': 'fp16_32x32_nz4d_cacheNone',
+    'dtype': 'fp16',
+    'route': 'nd2nz',
+    'm': 32,
+    'n': 32,
+    'physical': True,
+    'cache': None
+}, {
+    'name': 'fp16_32x32_nz4d_cache0',
+    'dtype': 'fp16',
+    'route': 'nd2nz',
+    'm': 32,
+    'n': 32,
+    'physical': True,
+    'cache': 0
+}, {
+    'name': 'fp16_32x32_nz4d_cache1',
+    'dtype': 'fp16',
+    'route': 'nd2nz',
+    'm': 32,
+    'n': 32,
+    'physical': True,
+    'cache': 1
+}, {
+    'name': 'fp16_32x32_nz4d_cache2',
+    'dtype': 'fp16',
+    'route': 'nd2nz',
+    'm': 32,
+    'n': 32,
+    'physical': True,
+    'cache': 2
+}, {
+    'name': 'fp16_32x32_nz4d_cache3',
+    'dtype': 'fp16',
+    'route': 'nd2nz',
+    'm': 32,
+    'n': 32,
+    'physical': True,
+    'cache': 3
+}]
 
 
 @matrix(CONFIGS)

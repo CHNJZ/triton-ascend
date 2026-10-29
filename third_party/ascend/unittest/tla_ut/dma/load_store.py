@@ -44,9 +44,28 @@ STORE_CASES += [
     for kind in tla.AtomicKind
 ]
 STORE_CASES += [dict(name="float_" + kind.lower(), kind=kind, dtype="fp32") for kind in ("ADD", "MAX", "MIN")]
-L1_CASES = [{'name': 'fp16_16x16_logical2d', 'dtype': 'fp16', 'route': 'load', 'm': 16, 'n': 16, 'physical':
-             False}, {'name': 'fp16_16x16_nz4d', 'dtype': 'fp16', 'route': 'load', 'm': 16, 'n': 16, 'physical': True},
-            {'name': 'fp16_32x32_nz4d', 'dtype': 'fp16', 'route': 'load', 'm': 32, 'n': 32, 'physical': True}]
+L1_CASES = [{
+    'name': 'fp16_16x32_nz4d',
+    'dtype': 'fp16',
+    'route': 'load',
+    'm': 16,
+    'n': 32,
+    'physical': True
+}, {
+    'name': 'fp16_16x16_nz4d',
+    'dtype': 'fp16',
+    'route': 'load',
+    'm': 16,
+    'n': 16,
+    'physical': True
+}, {
+    'name': 'fp16_32x32_nz4d',
+    'dtype': 'fp16',
+    'route': 'load',
+    'm': 32,
+    'n': 32,
+    'physical': True
+}]
 CONFIGS = [
     dict(c, name="load_" + c["name"], op="load_gm_to_ub", family="load", dependencies=["store_ub_to_gm"])
     for c in LOAD_CASES
@@ -293,9 +312,15 @@ def main():
         if do_ir:
             test_ir(case)
         if do_compile:
-            test_compile(case)
+            try:
+                test_compile(case)
+            except pytest.skip.Exception as exc:
+                print("COMPILE SKIP:", case["name"], str(exc))
         if do_run:
-            test_run(case)
+            try:
+                test_run(case)
+            except pytest.skip.Exception as exc:
+                print("ACCURACY SKIP:", case["name"], str(exc))
 
 
 if __name__ == "__main__":

@@ -21,9 +21,20 @@ DEPENDENCIES = ["nd2nz_gm_to_l1", "mmad", "store_ub_to_gm"]
 
 
 def config(name, **kw):
-    values = dict(name=name, out="fp32", mode="NZ2ND", relu="NO_RELU", unit=None, accumulate=False, dest="gm",
-                  physical=False, quant="NO_QUANT", scale=None, dual="NO_DUAL", sub="SUB_BLOCK_0", channel=False,
-                  c0=True, transpose=False)
+    values = dict(name=name,
+                  out="fp32",
+                  mode="NZ2ND",
+                  relu="NO_RELU",
+                  unit=None,
+                  accumulate=False,
+                  dest="gm",
+                  quant="NO_QUANT",
+                  scale=None,
+                  dual="NO_DUAL",
+                  sub="SUB_BLOCK_0",
+                  channel=False,
+                  c0=True,
+                  transpose=False)
     values.update(kw)
     return values
 
@@ -45,11 +56,6 @@ CONFIGS = [
     config("channel_split", channel=True)
 ]
 CONFIGS += [
-    config("nz4d_" + name, physical=True, **kw)
-    for name, kw in (("gm_f32", {}), ("gm_f16", dict(out="fp16", quant="F322F16")), ("gm_nz2dn", dict(mode="NZ2DN")),
-                     ("ub_f32", dict(dest="ub")))
-]
-CONFIGS += [
     config("dual_" + mode.lower(), dest="ub", out="fp16", quant="F322F16", dual=mode, sub=None,
            accuracy_reason="Split UB output needs a two-subblock address/reference protocol")
     for mode in ("ROW_SPLIT", "COLUMN_SPLIT")
@@ -68,8 +74,8 @@ for _case in CONFIGS:
     _case["dependencies"] = ["nd2nz_gm_to_l1", "mmad", "store_ub_to_gm"]
 CONFIGS += [
     dict(c, name="mmad_" + c["name"], op="mmad", dependencies=["nd2nz_gm_to_l1", "fixpipe_l0c_to_dst"])
-    for c in (config("clear"), config("transpose_b", transpose=True), config("unit0", unit=0), config("unit3", unit=3),
-              config("accumulate_unit2_then3", unit=3, accumulate=True), config("nz4d_consumer", physical=True))
+    for c in (config("clear"), config("transpose_b", transpose=True), config("unit0", unit=0),
+              config("unit3", unit=3), config("accumulate_unit2_then3", unit=3, accumulate=True))
 ]
 
 
@@ -163,56 +169,85 @@ def _check_ir_unit_flags():
 
 @triton.jit
 def product(A, B, Y, OUT: tl.constexpr, DMA: tl.constexpr, RELU: tl.constexpr, UNIT: tl.constexpr,
-            ACCUMULATE: tl.constexpr, DEST: tl.constexpr, PHYSICAL: tl.constexpr, QUANT: tl.constexpr,
-            SCALE: tl.constexpr, DUAL: tl.constexpr, SUB: tl.constexpr, CHANNEL: tl.constexpr, C0: tl.constexpr,
+            ACCUMULATE: tl.constexpr, DEST: tl.constexpr, QUANT: tl.constexpr, SCALE: tl.constexpr,
+            DUAL: tl.constexpr, SUB: tl.constexpr, CHANNEL: tl.constexpr, C0: tl.constexpr,
             TRANSPOSE: tl.constexpr):
     input_dtype: tl.constexpr = tl.int8 if OUT == "int8" else tl.float16
     acc_dtype: tl.constexpr = tl.int32 if OUT == "int8" else tl.float32
     k: tl.constexpr = 32 if OUT == "int8" else 16
-    a = tla.alloc((16, k), input_dtype, space="l1", is_mem_unique=True)
-    b = tla.alloc((k, 16), input_dtype, space="l1", is_mem_unique=True)
-    acc = tla.alloc((16, 16), acc_dtype, space="l0c", is_mem_unique=True)
+    n: tl.constexpr = 32 if OUT == "int8" else 16
+    c0: tl.constexpr = 32 if OUT == "int8" else 16
     dtype: tl.constexpr = tl.int8 if OUT == "int8" else (tl.float16 if OUT == "fp16" else
                                                          (tl.bfloat16 if OUT == "bf16" else tl.float32))
     rows: tl.constexpr = 8 if DUAL == tla.FixpipeDualDstMode.ROW_SPLIT else 16
-    cols: tl.constexpr = 8 if DUAL == tla.FixpipeDualDstMode.COLUMN_SPLIT else 16
+    cols: tl.constexpr = n // 2 if DUAL == tla.FixpipeDualDstMode.COLUMN_SPLIT else n
     if DEST == "ub":
         dst = tla.alloc((rows, cols), dtype, is_mem_unique=True)
+    elif DMA == tla.FixpipeDMAMode.NZ2NZ:
+        dst = tla.view(Y, (n // 16, 1, 16, 16))
     else:
         dst = tla.view(Y, (rows, cols))
     group: tl.constexpr = 0 if UNIT is not None else None
     with tla.scope.cube():
+        a = tla.alloc((k // c0, 1, 16, c0), input_dtype, space="l1", is_mem_unique=True)
+        b = tla.alloc((n // c0, k // 16, 16, c0), input_dtype, space="l1", is_mem_unique=True)
+        acc = tla.alloc((n // 16, 1, 16, 16), acc_dtype, space="l0c", is_mem_unique=True)
         tla.nd2nz_gm_to_l1(tla.view(A, (16, k)), a)
-        tla.nd2nz_gm_to_l1(tla.view(B, (k, 16)), b)
+        tla.nd2nz_gm_to_l1(tla.view(B, (k, n)), b)
         if ACCUMULATE:
-            tla.cube.mmad(a, b, acc, clear_accum=True, transpose_b=TRANSPOSE,
-                          unit_flag_ctrl=tla.UnitFlagMode.ENABLED_WITHOUT_UPDATE, unit_flag_group_id=0)
-            tla.cube.mmad(a, b, acc, clear_accum=False, transpose_b=TRANSPOSE,
-                          unit_flag_ctrl=tla.UnitFlagMode.ENABLED_WITH_UPDATE, unit_flag_group_id=0)
+            tla.cube.mmad(a,
+                          b,
+                          acc,
+                          clear_accum=True,
+                          transpose_b=TRANSPOSE,
+                          unit_flag_ctrl=tla.UnitFlagMode.ENABLED_WITHOUT_UPDATE,
+                          unit_flag_group_id=0)
+            tla.cube.mmad(a,
+                          b,
+                          acc,
+                          clear_accum=False,
+                          transpose_b=TRANSPOSE,
+                          unit_flag_ctrl=tla.UnitFlagMode.ENABLED_WITH_UPDATE,
+                          unit_flag_group_id=0)
         else:
-            tla.cube.mmad(a, b, acc, clear_accum=True, transpose_b=TRANSPOSE, unit_flag_ctrl=UNIT,
+            tla.cube.mmad(a,
+                          b,
+                          acc,
+                          clear_accum=True,
+                          transpose_b=TRANSPOSE,
+                          unit_flag_ctrl=UNIT,
                           unit_flag_group_id=group)
-        if PHYSICAL:
-            physical_acc = tla.reshape(acc, (1, 1, 16, 16))
-            tla.fixpipe_l0c_to_dst(physical_acc, dst, dma_mode=DMA, pre_quant=QUANT, pre_relu=RELU, quant_scale=SCALE,
-                                   unit_flag_ctrl=UNIT, unit_flag_group_id=group, dual_dst_mode=DUAL, sub_block_idx=SUB,
-                                   channel_split=CHANNEL, c0_pad_en=C0)
-        else:
-            tla.fixpipe_l0c_to_dst(acc, dst, dma_mode=DMA, pre_quant=QUANT, pre_relu=RELU, quant_scale=SCALE,
-                                   unit_flag_ctrl=UNIT, unit_flag_group_id=group, dual_dst_mode=DUAL, sub_block_idx=SUB,
-                                   channel_split=CHANNEL, c0_pad_en=C0)
+        tla.fixpipe_l0c_to_dst(acc,
+                               dst,
+                               dma_mode=DMA,
+                               pre_quant=QUANT,
+                               pre_relu=RELU,
+                               quant_scale=SCALE,
+                               unit_flag_ctrl=UNIT,
+                               unit_flag_group_id=group,
+                               dual_dst_mode=DUAL,
+                               sub_block_idx=SUB,
+                               channel_split=CHANNEL,
+                               c0_pad_en=C0)
     if DEST == "ub":
-        tla.store_ub_to_gm(dst, tla.view(Y, (rows, cols)))
+        with tla.scope.vector():
+            tla.store_ub_to_gm(dst, tla.view(Y, (rows, cols)))
 
 
 def constants(case):
-    return dict(OUT=case["out"], DMA=getattr(tla.FixpipeDMAMode,
-                                             case["mode"]), RELU=getattr(tla.FixpipePreReluMode, case["relu"]),
-                UNIT=case["unit"], ACCUMULATE=case["accumulate"], DEST=case["dest"], PHYSICAL=case["physical"],
-                QUANT=getattr(tla.FixpipePreQuantMode,
-                              case["quant"]), SCALE=case["scale"], DUAL=getattr(tla.FixpipeDualDstMode, case["dual"]),
-                SUB=None if case["sub"] is None else getattr(tla.FixpipeSubBlock, case["sub"]), CHANNEL=case["channel"],
-                C0=case["c0"], TRANSPOSE=case["transpose"])
+    return dict(OUT=case["out"],
+                DMA=getattr(tla.FixpipeDMAMode, case["mode"]),
+                RELU=getattr(tla.FixpipePreReluMode, case["relu"]),
+                UNIT=case["unit"],
+                ACCUMULATE=case["accumulate"],
+                DEST=case["dest"],
+                QUANT=getattr(tla.FixpipePreQuantMode, case["quant"]),
+                SCALE=case["scale"],
+                DUAL=getattr(tla.FixpipeDualDstMode, case["dual"]),
+                SUB=None if case["sub"] is None else getattr(tla.FixpipeSubBlock, case["sub"]),
+                CHANNEL=case["channel"],
+                C0=case["c0"],
+                TRANSPOSE=case["transpose"])
 
 
 @matrix(CONFIGS)
@@ -240,15 +275,22 @@ def test_ir(case, output_dir=None):
 
 
 def launch(case, compile_only=False):
-    dtype = {"fp32": torch.float32, "fp16": torch.float16, "bf16": torch.bfloat16, "int8": torch.int8}[case["out"]]
+    dtype = {
+        "fp32": torch.float32,
+        "fp16": torch.float16,
+        "bf16": torch.bfloat16,
+        "int8": torch.int8
+    }[case["out"]]
     generator = torch.Generator().manual_seed(42)
     k = 32 if case["out"] == "int8" else 16
+    n = 32 if case["out"] == "int8" else 16
     a_cpu = (torch.randn(16, k, generator=generator) * 3).to(torch.int8 if k == 32 else torch.float16)
-    b_cpu = (torch.randn(k, 16, generator=generator) * 3).to(a_cpu.dtype)
-    y = torch.full((16, 16), -77, dtype=dtype, device="npu")
+    b_cpu = (torch.randn(k, n, generator=generator) * 3).to(a_cpu.dtype)
+    y = torch.full((16, n), -77, dtype=dtype, device="npu")
     a, b = a_cpu.npu(), b_cpu.npu()
     if compile_only:
-        return product.warmup(a, b, y, grid=(1, ), enable_tla_mode=get_tla_mode(), **constants(case)), None, None
+        return product.warmup(a, b, y, grid=(1, ), enable_tla_mode=get_tla_mode(),
+                              **constants(case)), None, None
     kernel = product[(1, )](a, b, y, enable_tla_mode=get_tla_mode(), **constants(case))
     torch.npu.synchronize()
     rhs = b_cpu.float().T if case["transpose"] else b_cpu.float()
@@ -285,9 +327,15 @@ def main():
         if do_ir:
             test_ir(case)
         if do_compile:
-            test_compile(case)
+            try:
+                test_compile(case)
+            except pytest.skip.Exception as exc:
+                print("COMPILE SKIP:", case["name"], str(exc))
         if do_run:
-            test_run(case)
+            try:
+                test_run(case)
+            except pytest.skip.Exception as exc:
+                print("ACCURACY SKIP:", case["name"], str(exc))
 
 
 if __name__ == "__main__":
