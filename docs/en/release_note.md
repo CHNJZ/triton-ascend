@@ -7,11 +7,13 @@ Triton-Ascend releases provide a stable snapshot of the codebase, packaged as bi
 The following is the Triton-Ascend release schedule. Note that patch releases are optional.
 
 | Major Version | Release Branch Cut Date | Release Date     | Version Nature   |
-|-------------|-------------------------|------------------|------------------|
-| 3.6.0       | September 30, 2026      | October 15, 2026 | Official release |
-| 3.2.2       | July 15,2026            | July 31,2026     | Official release          |
-| 3.2.1       | April 15,2026           | May 6,2026       | Official release          |
-| 3.2.0       | December 8,2025         | January 21,2026  | Official release          |
+|---------------|-------------------------|------------------|------------------|
+| 3.6.0.post2   | October 15, 2026      | October 29, 2026 | Patch version |
+| 3.6.0         | September 30, 2026      | October 15, 2026 | Official release |
+| 3.2.2.post2 | September 30, 2026      | October 15, 2026 | Patch version    |
+| 3.2.2         | July 15,2026            | July 31,2026     | Official release          |
+| 3.2.1         | April 15,2026           | May 6,2026       | Official release          |
+| 3.2.0         | December 8,2025         | January 21,2026  | Official release          |
 
 Note: Version 3.2.0 is archived on [gitcode (AtomGit)](https://gitcode.com/Ascend/triton-ascend/releases), while version 3.2.1 and later have been migrated to [GitHub](https://github.com/triton-lang/triton-ascend/releases).
 
@@ -40,12 +42,12 @@ Maintenance branch statuses include:
 - **Maintenance**: Only accepts critical bug fixes and security patches; no feature improvements are released
 - **End of Life**: No fixes are accepted; maintenance of the branch has stopped
 
-| Branch          | Status     | Triton Version | Triton-Ascend Release                    | End of Maintenance |
-|-----------------| -------- | ------------ |------------------------------------------| -------- |
-| `main`          | `Active`   | `3.6.0`      | /                                        | /        |
-| `release/3.6.0` | `Active`   | `3.6.0`   | `3.6.0`                                  | /        |
-| `release/3.2.2` | `Maintenance`   | `3.2.0`      | `3.2.2`                                  | /        |
-| `release/3.2.1` | `Maintenance`   | `3.2.0`      | `3.2.1`                                  | /        |
+| Branch          | Status     | Triton Version | Triton-Ascend Release                       | End of Maintenance |
+|-----------------| -------- | ------------ |---------------------------------------------| -------- |
+| `main`          | `Active`   | `3.6.0`      | /                                           | /        |
+| `release/3.6.0` | `Active`   | `3.6.0`   | `3.6.0.post2`,`3.6.0`                       | /        |
+| `release/3.2.2` | `Maintenance`   | `3.2.0`      | `3.2.2.post2`,`3.2.2`                       | /        |
+| `release/3.2.1` | `Maintenance`   | `3.2.0`      | `3.2.1`                                     | /        |
 | `release/3.2.x` | `Maintenance`   | `3.2.0`      | `3.2.0rc2`, `3.2.0rc3`, `3.2.0rc4`, `3.2.0` | /        |
 
 ## Release Cycle
@@ -91,7 +93,9 @@ Maintenance branch statuses include:
     <tr><td>3.2.0</td><td>2.6.0</td><td>/</td><td>/</td><td>/</td><td>/</td><td>/</td></tr>
     <tr><td>3.2.1</td><td>/</td><td>2.7.1</td><td>2.8.0</td><td>2.9.1</td><td>2.10.0</td><td>/</td></tr>
     <tr><td>3.2.2</td><td>/</td><td>2.7.1.post8</td><td>/</td><td>2.9.0.post6</td><td>2.10.0.post4</td><td>/</td></tr>
+    <tr><td>3.2.2.post2</td><td>/</td><td>2.7.1.post11</td><td>/</td><td>2.9.0.post9</td><td>2.10.0.post7</td><td>/</td></tr>
     <tr><td>3.6.0</td><td>/</td><td>/</td><td>/</td><td>/</td><td>2.10.0.post7</td><td>2.13.0</td></tr>
+    <tr><td>3.6.0.post2</td><td>/</td><td>/</td><td>/</td><td>/</td><td>2.10.0.post7</td><td>2.13.0</td></tr>
   </tbody>
 </table>
 
@@ -122,6 +126,8 @@ Maintenance branch statuses include:
     <tr><td>3.2.0</td><td>Y</td><td>/</td><td>/</td><td>/</td><td>/</td><td>/</td><td>/</td><td>/</td></tr>
     <tr><td>3.2.1</td><td>/</td><td>Y</td><td>/</td><td>/</td><td>/</td><td>Y</td><td>/</td><td>/</td></tr>
     <tr><td>3.2.2</td><td>/</td><td>Y</td><td>Y</td><td>/</td><td>/</td><td>Y</td><td>Y</td><td>/</td></tr>
+    <tr><td>3.2.2.post2</td><td>Y</td><td>Y</td><td>Y</td><td>Y</td><td>/</td><td>/</td><td>Y</td><td>Y</td></tr>
     <tr><td>3.6.0</td><td>Y</td><td>Y</td><td>Y</td><td>Y</td><td>/</td><td>/</td><td>Y</td><td>Y</td></tr>
+    <tr><td>3.6.0.post2</td><td>Y</td><td>Y</td><td>Y</td><td>Y</td><td>/</td><td>/</td><td>Y</td><td>Y</td></tr>
   </tbody>
 </table>

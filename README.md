@@ -22,7 +22,8 @@ Triton-Ascend
 
 ## 🔥 Latest News
 
-- [2026.10.15] Triton-Ascend 3.6.0 official releases are now available
+- [2026.10.29] Triton-Ascend 3.6.0.post2 official releases are now available
+- [2026.10.15] Triton-Ascend 3.2.2.post2 and 3.6.0 official releases are now available
 - [2026.07.31] Triton-Ascend 3.2.2 official release is now available
 - [2026.04.30] Triton-Ascend 3.2.1 official release is now available
 - [2026.01.20] Triton-Ascend 3.2.0 official release is now available

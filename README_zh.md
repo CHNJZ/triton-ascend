@@ -22,7 +22,8 @@ Triton-Ascend
 
 ## 🔥 最新消息
 
-- [2026.10.15]Triton-Ascend 3.6.0正式版本上线
+- [2026.10.29]Triton-Ascend 3.6.0.post2正式版本上线
+- [2026.10.15]Triton-Ascend 3.2.2.post2及3.6.0正式版本上线
 - [2026.07.31]Triton-Ascend 3.2.2正式版本上线
 - [2026.04.30]Triton-Ascend 3.2.1正式版本上线
 - [2026.01.20]Triton-Ascend 3.2.0正式版本上线
