@@ -117,25 +117,17 @@ def _scalar(value, semantic, dtype=None):
     return result.handle
 
 
-def _emit(kind, src, dst, semantic, attrs=None, operands=()):
-    attrs = {name: value for name, value in (attrs or {}).items() if value is not None}
-    semantic.builder.create_tla_dma(kind, src.handle, dst.handle, attrs, list(operands))
-
-
-def _unit_flag_attrs(control, group_id, semantic):
-    """Encode a static native mode; conditional modes remain backend-managed."""
+def _unit_flag_args(control, group_id):
+    """Unwrap static inputs; native op builders encode the HIVM attributes."""
     control = _unwrap_if_constexpr(control)
-    attrs = {}
     if control is not None:
         if isinstance(control, UnitFlagMode):
             control = control.value
         control = _integer(control, "unit_flag_ctrl", bits=32)
-        mode = semantic.builder.get_tla_unit_flag_attr(control)
-        attrs["unit_flag_mode"] = semantic.builder.get_array_attr([mode])
-    if _unwrap_if_constexpr(group_id) is not None:
+    group_id = _unwrap_if_constexpr(group_id)
+    if group_id is not None:
         group_id = _integer(group_id, "unit_flag_group_id")
-        attrs["unit_flag_group_id"] = semantic.builder.parse_attr(f"{group_id} : i64")
-    return attrs
+    return control, group_id
 
 
 @dataclass(frozen=True)
@@ -255,17 +247,16 @@ def load_gm_to_ub(src, dst, params=None, _semantic=None):
         "pad_mode": _enum_attr(p.pad_mode, PadMode, "padmode", _semantic),
         "eviction_policy": _enum_attr(p.eviction_policy, EvictionPolicy, "eviction_policy", _semantic),
     }
-    _emit("load",
-          src, dst, _semantic, attrs, (_scalar(p.pad_value, _semantic, src.dtype), _scalar(
-              p.left_padding_num, _semantic), _scalar(p.right_padding_num, _semantic)))
+    _semantic.builder.create_tla_load(src.handle, dst.handle, attrs, _scalar(p.pad_value, _semantic, src.dtype),
+                                      _scalar(p.left_padding_num, _semantic), _scalar(p.right_padding_num, _semantic))
 
 
 @builtin
 def store_ub_to_gm(src, dst, params=None, _semantic=None):
     _route(src, dst, (("ub", "gm"), ))
     p = _params(params, StoreUB2GMParams)
-    _emit("store", src, dst, _semantic,
-          {"atomic_kind": _enum_attr(p.atomic_kind, AtomicKind, "atomic_kind", _semantic)})
+    _semantic.builder.create_tla_store(src.handle, dst.handle,
+                                       {"atomic_kind": _enum_attr(p.atomic_kind, AtomicKind, "atomic_kind", _semantic)})
 
 
 @builtin
@@ -280,7 +271,7 @@ def load_gm_to_l1(src, dst, params=None, _semantic=None):
     attrs = {}
     if cache is not None:
         attrs["l2_cache_mode"] = _semantic.builder.get_int32_attr(_integer(cache, "l2_cache_ctrl", bits=32))
-    _emit("nd2nz", src, dst, _semantic, attrs)
+    _semantic.builder.create_tla_nd2nz(src.handle, dst.handle, attrs)
 
 
 @builtin
@@ -295,7 +286,7 @@ def copy_ub_to_l1(src, dst, params=None, _semantic=None):
                     for axis in _unwrap_if_constexpr(group)]
                    for group in groups]
         attrs["collapse_reassociation"] = _semantic.builder.parse_attr(str(indices))
-    _emit("copy", src, dst, _semantic, attrs, (_scalar(p.pad_value, _semantic, src.dtype), ))
+    _semantic.builder.create_tla_copy(src.handle, dst.handle, attrs, _scalar(p.pad_value, _semantic, src.dtype))
 
 
 @builtin
@@ -303,7 +294,7 @@ def copy_l1_to_ub(src, dst, params=None, _semantic=None):
     """L1 NZ -> UB ND; L12UBOp includes the layout conversion."""
     _route(src, dst, (("l1", "ub"), ))
     _params(params, CopyL12UBParams)
-    _emit("l12ub", src, dst, _semantic)
+    _semantic.builder.create_tla_l12ub(src.handle, dst.handle)
 
 
 @builtin
@@ -312,7 +303,7 @@ def copy_l1_to_bt(src, dst, params=None, _semantic=None):
     _route(src, dst, (("l1", "bt"), ))
     p = _params(params, CopyL12BTParams)
     n = src.shape[-1] if _unwrap_if_constexpr(p.n) is None else p.n
-    _emit("l12bt", src, dst, _semantic, operands=(_scalar(n, _semantic), ))
+    _semantic.builder.create_tla_l12bt(src.handle, dst.handle, _scalar(n, _semantic))
 
 
 @builtin
@@ -329,14 +320,13 @@ def copy_l1_to_l0(src, dst, params=None, _semantic=None):
     if _unwrap_if_constexpr(p.actual_batch) is not None:
         raise NotImplementedError("actual_batch has no field in L12L0Op; use the native k_part_* and m fields "
                                   "pending specification review")
-    attrs = {}
+    parts = []
     for name in ("k_part_idx", "k_part", "k_part_ceil", "k_part_loop", "k_part_actual", "m"):
         value = _unwrap_if_constexpr(getattr(p, name))
         if value is None:
             raise ValueError(f"CopyL1ToL0Params requires native backend field {name}")
-        attrs[name] = _semantic.builder.parse_attr(f"{_integer(value, name)} : i64")
-    attrs["is_transposed"] = _semantic.builder.get_bool_attr(_boolean(p.is_transpose, "is_transpose"))
-    _emit("l12l0", src, dst, _semantic, attrs)
+        parts.append(_integer(value, name))
+    _semantic.builder.create_tla_l12l0(src.handle, dst.handle, *parts, _boolean(p.is_transpose, "is_transpose"))
 
 
 def _fixpipe(src, dst, p, semantic):
@@ -354,9 +344,9 @@ def _fixpipe(src, dst, p, semantic):
     if isinstance(p, FixpipeL0C2L1Params):
         attrs["channel_split"] = semantic.builder.get_bool_attr(_boolean(p.channel_split, "channel_split"))
         attrs["c0_pad_en"] = semantic.builder.get_bool_attr(_boolean(p.c0_pad_en, "c0_pad_en"))
-    attrs.update(_unit_flag_attrs(p.unit_flag_ctrl, p.unit_flag_group_id, semantic))
     from triton.language import float32
-    _emit("fixpipe", src, dst, semantic, attrs, (_scalar(p.quant_scale, semantic, float32), ))
+    semantic.builder.create_tla_fixpipe(src.handle, dst.handle, attrs, _scalar(p.quant_scale, semantic, float32),
+                                        *_unit_flag_args(p.unit_flag_ctrl, p.unit_flag_group_id))
 
 
 @builtin

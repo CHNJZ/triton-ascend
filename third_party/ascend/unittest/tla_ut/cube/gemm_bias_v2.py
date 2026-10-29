@@ -21,7 +21,7 @@ SIGNATURE = {"A": "*fp16", "B": "*fp16", "Y": "*fp32"}
 
 
 @tla.jit
-def cv_gemm_bias(A, B, Y, M: tl.constexpr, N: tl.constexpr, K: tl.constexpr, BIAS: tl.constexpr):
+def gemm_bias_v2(A, B, Y, M: tl.constexpr, N: tl.constexpr, K: tl.constexpr, BIAS: tl.constexpr):
     tl.static_assert(M % 16 == 0 and K % 16 == 0 and N == 64)
     # Fixpipe ROW_SPLIT gives each AIV half the rows in its own UB.
     product_ub = tla.alloc((M // 2, N), tl.float32, space="ub")
@@ -50,7 +50,7 @@ def cv_gemm_bias(A, B, Y, M: tl.constexpr, N: tl.constexpr, K: tl.constexpr, BIA
 
 def test_ir(output_dir=None):
     module, ctx = compile_offline(
-        cv_gemm_bias,
+        gemm_bias_v2,
         SIGNATURE,
         dict(SHAPE, BIAS=BIAS),
         output_dir=output_dir,
@@ -71,7 +71,7 @@ def test_ir(output_dir=None):
     assert 'mix_mode = "mix"' in text
     assert "!tt.ptr" not in text and "tt.store" not in text
     assert "tensor<" not in text and "bufferization." not in text
-    print("IR PASS: cv_gemm_bias; Cube MMAD/Fixpipe -> SIMD add -> UB-to-GM")
+    print("IR PASS: gemm_bias_v2; Cube MMAD/Fixpipe -> SIMD add -> UB-to-GM")
 
 
 def _launch(seed=7, compile_only=False):
@@ -81,9 +81,9 @@ def _launch(seed=7, compile_only=False):
     x, y = a.npu(), b.npu()
     out = torch.full((SHAPE["M"], SHAPE["N"]), float("nan"), dtype=torch.float32, device="npu")
     if compile_only:
-        kernel = cv_gemm_bias.warmup(x, y, out, grid=(1, ), BIAS=BIAS, **SHAPE)
+        kernel = gemm_bias_v2.warmup(x, y, out, grid=(1, ), BIAS=BIAS, **SHAPE)
         return kernel, None, None
-    kernel = cv_gemm_bias[(1, )](x, y, out, BIAS=BIAS, **SHAPE)
+    kernel = gemm_bias_v2[(1, )](x, y, out, BIAS=BIAS, **SHAPE)
     torch.npu.synchronize()
     return kernel, out.cpu(), a.float() @ b.float() + BIAS
 
@@ -99,7 +99,7 @@ def test_run():
         _, actual, expected = _launch(seed)
         assert torch.isfinite(actual).all(), "CV left unwritten or non-finite output"
         torch.testing.assert_close(actual, expected, rtol=1e-3, atol=3e-2)
-        print("ACCURACY PASS: cv_gemm_bias", SHAPE, "bias", BIAS, "seed", seed, "max_abs_error",
+        print("ACCURACY PASS: gemm_bias_v2", SHAPE, "bias", BIAS, "seed", seed, "max_abs_error",
               (actual - expected).abs().max().item())
 
 

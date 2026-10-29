@@ -115,6 +115,22 @@ def lower_ttir(module, context, compile_on_910_95=True, compile_mode="simd_simt_
     return module
 
 
+def lower_runtime(module, metadata, options, *, named_ops=True):
+    """Adapt TLA lowering to the backend's launch metadata and IR output."""
+    from triton.backends.ascend import compiler as backend
+
+    metadata["has_auto_blockify_blacklist_op"] = bool(backend._get_auto_blockify_blacklist_reasons(str(module)))
+    # TLA scopes already define the Cube/Vector partition and scheduling.
+    metadata["enable_dynamic_cv_pipeline"] = False
+    lowered = lower_ttir(module, module.context, compile_on_910_95=options.compile_on_910_95,
+                         compile_mode=options.compile_mode, named_ops=named_ops)
+    backend._export_program_grid_metadata(lowered, metadata)
+    text = backend._serialize_module(lowered, options)
+    if options.debug:
+        backend.get_dump_manager(metadata["hash"]).put(text, "kernel.ttadapter.mlir", binary=False)
+    return text
+
+
 def _kernel_entries(module):
     """All non-private func.func ops: the ttadapter kernel entry candidates."""
     operations = []

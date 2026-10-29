@@ -12,7 +12,7 @@ import torch
 import triton.language as tl
 import triton.language.extra.tla as tla
 
-from utils.tla_test_utils import get_stages, compile_offline, lower_offline, check_kernel_binary, matrix, selected
+from utils.tla_test_utils import get_stages, compile_offline, lower_offline, check_kernel_binary, matrix
 
 SHAPE = dict(M=16, N=64, K=32)
 SIGNATURE = {"A": "*fp16", "B": "*fp16", "C": "*fp32"}
@@ -29,7 +29,7 @@ def constants(case):
 
 
 @tla.jit
-def gemm_explicit(A, B, C, M: tl.constexpr, N: tl.constexpr, K: tl.constexpr, UNIT: tl.constexpr, GROUP: tl.constexpr,
+def gemm_basic_v2(A, B, C, M: tl.constexpr, N: tl.constexpr, K: tl.constexpr, UNIT: tl.constexpr, GROUP: tl.constexpr,
                   ACCUMULATE: tl.constexpr):
     tl.static_assert(M % 16 == 0 and N % 16 == 0 and K % 16 == 0)
     with tla.scope.cube():
@@ -49,7 +49,7 @@ def gemm_explicit(A, B, C, M: tl.constexpr, N: tl.constexpr, K: tl.constexpr, UN
 
 @matrix(CONFIGS)
 def test_ir(case, output_dir=None):
-    module, ctx = compile_offline(gemm_explicit, SIGNATURE, constants(case), output_dir=output_dir)
+    module, ctx = compile_offline(gemm_basic_v2, SIGNATURE, constants(case), output_dir=output_dir)
     text = str(lower_offline(module, ctx, output_dir=output_dir))
     for op, count in (("nd2nz", 2), ("mmadL1", 2 if case["accumulate"] else 1), ("fixpipe", 1)):
         assert text.count("hivm.hir." + op + " ") == count, op
@@ -69,7 +69,7 @@ def test_ir(case, output_dir=None):
     assert "hivm.vector_function" not in text
     assert "!tt.ptr" not in text and "tt.store" not in text
     assert "tensor<" not in text and "bufferization." not in text
-    print("IR PASS: gemm_explicit", case["name"])
+    print("IR PASS: gemm_basic_v2", case["name"])
 
 
 def _launch(case, seed=7, compile_only=False):
@@ -82,9 +82,9 @@ def _launch(case, seed=7, compile_only=False):
     # optimization when exercising manual flags; ordinary pipe sync stays on.
     options = {} if case["unit"] is None else {"unit_flag": False}
     if compile_only:
-        kernel = gemm_explicit.warmup(x, y, out, grid=(1, ), **constants(case), **options)
+        kernel = gemm_basic_v2.warmup(x, y, out, grid=(1, ), **constants(case), **options)
         return kernel, None, None
-    kernel = gemm_explicit[(1, )](x, y, out, **constants(case), **options)
+    kernel = gemm_basic_v2[(1, )](x, y, out, **constants(case), **options)
     torch.npu.synchronize()
     expected = a.float() @ b.float()
     return kernel, out.cpu(), expected * (2 if case["accumulate"] else 1)
@@ -103,13 +103,13 @@ def test_run(case):
         _, actual, expected = _launch(case, seed)
         assert torch.isfinite(actual).all(), "GEMM left unwritten or non-finite output"
         torch.testing.assert_close(actual, expected, rtol=1e-3, atol=3e-2)
-        print("ACCURACY PASS: gemm_explicit", case["name"], SHAPE, "seed", seed, "max_abs_error",
+        print("ACCURACY PASS: gemm_basic_v2", case["name"], SHAPE, "seed", seed, "max_abs_error",
               (actual - expected).abs().max().item())
 
 
 def main():
     do_ir, do_compile, do_run = get_stages()
-    for case in selected(CONFIGS):
+    for case in CONFIGS:
         if do_ir:
             test_ir(case)
         if do_compile:

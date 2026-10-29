@@ -25,7 +25,7 @@ Inputs may use logical 2-D shapes or physical 4-D NZ shapes. Only
 """
 from triton.language.core import builtin, _unwrap_if_constexpr
 from .core import buffer
-from .dma import _unit_flag_attrs
+from .dma import _unit_flag_args
 
 __all__ = ["mmad"]
 
@@ -72,4 +72,4 @@ def mmad(a, b, acc, transpose_b=False, clear_accum=False, unit_flag_ctrl=None, *
         raise ValueError("tla.mmad shape mismatch: a=(M,K), b=(K,N), acc=(M,N)")
     _semantic.builder.create_hivm_mmadl1(a.handle, b.handle, acc.handle, bool(_unwrap_if_constexpr(clear_accum)), m, k,
                                          n, bool(_unwrap_if_constexpr(transpose_b)),
-                                         _unit_flag_attrs(unit_flag_ctrl, unit_flag_group_id, _semantic))
+                                         *_unit_flag_args(unit_flag_ctrl, unit_flag_group_id))

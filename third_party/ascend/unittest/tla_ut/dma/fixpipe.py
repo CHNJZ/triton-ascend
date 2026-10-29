@@ -10,7 +10,7 @@ import pytest
 import torch
 import triton.language as tl
 import triton.language.extra.tla as tla
-from utils.tla_test_utils import (compile_offline, lower_offline, get_stages, check_kernel_binary, matrix, selected)
+from utils.tla_test_utils import (compile_offline, lower_offline, get_stages, check_kernel_binary, matrix)
 
 CONFIGS = [
     dict(name=target + "_" + dtype, target=target, dtype=dtype, mode=tla.FixpipeDMAMode.NZ2ND)
@@ -162,7 +162,7 @@ def test_run(case):
 
 def main():
     do_ir, do_compile, do_run = get_stages()
-    for case in selected(CONFIGS):
+    for case in CONFIGS:
         if do_ir:
             test_ir(case)
         if do_compile:

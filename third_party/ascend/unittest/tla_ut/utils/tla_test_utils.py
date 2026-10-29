@@ -154,11 +154,3 @@ def check_kernel_binary(kernel):
 
 def matrix(cases):
     return pytest.mark.parametrize("case", cases, ids=[case["name"] for case in cases])
-
-
-def selected(cases):
-    name = os.environ.get("TLA_TEST_CASE")
-    result = [case for case in cases if name is None or case["name"] == name]
-    if not result:
-        raise ValueError(f"unknown TLA_TEST_CASE={name!r}")
-    return result
