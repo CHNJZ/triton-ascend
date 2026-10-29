@@ -39,6 +39,7 @@ def handle_scope_with(generator, node):
 
     context_expr = node.items[0].context_expr
     withitem_class = generator.visit(context_expr.func)
+    generator.module.set_attr("hacc.mode", generator.builder.parse_attr('"tla"'))
 
     with enter_sub_region(generator):
         attrs = withitem_class.mlir_attrs(generator.builder)

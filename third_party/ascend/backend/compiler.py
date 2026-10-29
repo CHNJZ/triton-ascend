@@ -334,6 +334,21 @@ def make_ttir(mod, metadata, opt):
 
 
 def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
+    if re.search(r'\bhacc\.mode\s*=\s*"tla"', str(mod)):
+        # Share offline TLA lowering and core inference with the runtime.
+        # Generic lowering records mix_mode=aiv for Cube scopes, and dynamic
+        # CV rewriting must not reschedule explicitly partitioned TLA scopes.
+        from triton.language.extra.tla.compiler import lower_ttir
+
+        metadata["has_auto_blockify_blacklist_op"] = bool(_get_auto_blockify_blacklist_reasons(str(mod)))
+        metadata["enable_dynamic_cv_pipeline"] = False
+        mod = lower_ttir(mod, mod.context, compile_on_910_95=opt.compile_on_910_95, compile_mode=opt.compile_mode,
+                         named_ops=named_ops)
+        _export_program_grid_metadata(mod, metadata)
+        text = _serialize_module(mod, opt)
+        if opt.debug:
+            get_dump_manager(metadata["hash"]).put(text, "kernel.ttadapter.mlir", binary=False)
+        return text
     # use triton_adapter to lower Triton-MLIR to linalg
     # Get Triton-MLIR as string
     ttir_code = _serialize_module(mod, opt)
