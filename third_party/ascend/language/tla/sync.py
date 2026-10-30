@@ -13,7 +13,7 @@ explicit synchronization mode, which bishengir lowers to the FFTS
 
 from triton.language.core import builtin, _unwrap_if_constexpr
 
-__all__ = ["barrier", "set_flag", "wait_flag", "sync_all", "block_set_flag", "block_wait_flag"]
+__all__ = ["barrier", "set_flag", "wait_flag", "sync_all", "block_set_flag", "block_wait_flag", "sub_block_id"]
 
 _PIPES = frozenset([
     "PIPE_S",
@@ -92,11 +92,19 @@ def block_set_flag(mode, pipe, flag, _semantic=None):
 
 
 @builtin
-def block_wait_flag(pipe, flag, _semantic=None):
+def block_wait_flag(pipe, flag, *, mode=0, _semantic=None):
     """
     Wait for a cross-core flag on the given pipeline.
 
     :param pipe: waiting pipeline
     :param flag: flag ID in [0, 15], matching :func:`block_set_flag`
+    :param mode: synchronization mode matching the corresponding set (default 0)
     """
-    _semantic.builder.create_tla_block_wait_flag(_pipe(pipe), _integer(flag, "flag", 15))
+    _semantic.builder.create_tla_block_wait_flag(_pipe(pipe), _integer(flag, "flag", 15), _integer(mode, "mode", 2))
+
+
+@builtin
+def sub_block_id(_semantic=None):
+    """Index of the current AIV sub-block within its associated Cube block."""
+    from triton.language import tensor, int64
+    return tensor(_semantic.builder.create_tla_get_sub_block_idx(), int64)
