@@ -66,8 +66,7 @@
 #include "bishengir/Dialect/HIVM/IR/HIVMImpl.h"
 
 static constexpr const char *DEBUG_TYPE = "SplitIfByBlockId";
-static constexpr llvm::StringLiteral kSkippedKernels[1] = {
-    "parallel_deltaformer_fwd_kernel"};
+static constexpr llvm::StringLiteral kSkippedKernels[1] = {""};
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
 #define LDBG(...)                                                              \
   LLVM_DEBUG({                                                                 \

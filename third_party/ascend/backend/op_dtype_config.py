@@ -31,7 +31,7 @@
 #       "pointer_args": [0],
 #
 #       # The dtype blacklist per architecture bucket:
-#       #   "a2" -> Ascend A2/A3 ; "a5" -> Ascend 910_95 / 950
+#       #   "a2" -> Ascend A2/A3 ; "a5" -> Ascend 950
 #       #   * "unsupported": blacklist -- the interception decision uses this:
 #       #     a dtype listed here is rejected at the front end.
 #       # The accepted ("supported") dtypes are normally NOT stored; they are
@@ -725,9 +725,11 @@ OP_DTYPE_RULES = {
         },
         "supported": {
             "a2": [
+                "fp16",
                 "fp32",
             ],
             "a5": [
+                "fp16",
                 "fp32",
             ],
         },
