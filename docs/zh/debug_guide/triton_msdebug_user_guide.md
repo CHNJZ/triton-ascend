@@ -16,11 +16,6 @@ msDebug 适合排查以下问题：
 
 msDebug 不用于调试 Triton 编译器 Pass 本身。如果程序在生成 `kernel.o` 之前已经编译失败，应使用 IR Dump、编译日志以及 GDB/LLDB 调试 `triton-opt` 或编译器进程。
 
-本文基于以下官方资料整理：
-
-- [MindStudio Debugger 工具用户指南](https://gitcode.com/Ascend/msdebug/blob/master/docs/zh/user_guide/msdebug_user_guide.md)
-- [MindStudio 8.3：msDebug 工具介绍](https://www.hiascend.com/document/detail/zh/mindstudio/830/ODtools/Operatordevelopmenttools/atlasopdev_16_0062.html?framework=mindspore)
-
 ## 使用前准备
 
 ### 环境准备
