@@ -179,6 +179,7 @@ createAnalyzeCubeContolFLowInputChainPass();
 std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeDataFlowPass();
 std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeScopePass();
 std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeWhileConditionArgsPass();
+std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeSplitIfPass();
 
 void registerAnalyzeDataFlowPasses();
 

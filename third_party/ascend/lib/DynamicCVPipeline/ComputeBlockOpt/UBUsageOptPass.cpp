@@ -29,7 +29,6 @@
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
 #include "mlir/Analysis/AliasAnalysis.h"
-#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Block.h"
@@ -37,7 +36,6 @@
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Operation.h"
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -198,21 +196,10 @@ void UBUsageOptPass::buildUBUsageGraph(
   };
 
   DenseMap<std::pair<int, int>, bool> visited;
-  auto addEdge = [&](int src, int dst, int64_t sizeInBytes,
-                     bool isArgDep = false) {
+  auto addEdge = [&](int src, int dst, int64_t sizeInBytes) {
     if (visited.contains(std::make_pair(src, dst))) {
-      if (isArgDep) {
-        int linkNum = linkSize.size();
-        for (auto i = 0; i < linkNum; i++) {
-          if (linkEnd[i] == dst && linkStart[i] == src) {
-            linkSize[i] = sizeInBytes;
-            break;
-          }
-        }
-      }
       return;
     }
-
     if (src == dst) {
       // self-cycle can only be args dependency.
       LOG_DEBUG("Find one self-cycle: id edge from "
@@ -229,15 +216,9 @@ void UBUsageOptPass::buildUBUsageGraph(
     visited[std::make_pair(src, dst)] = true;
   };
 
-  // for{if} situation
-  Block *argBlock = block;
-  if (auto opt = CVPipeline::getFirstLoopBlock(block)) {
-    argBlock = opt;
-  }
-
-  Operation *terminator = argBlock->getTerminator();
+  Operation *terminator = block->getTerminator();
   if (terminator && isa<scf::YieldOp>(terminator)) {
-    unsigned maxArgIdx = std::min<unsigned>(argBlock->getNumArguments(),
+    unsigned maxArgIdx = std::min<unsigned>(block->getNumArguments(),
                                             terminator->getNumOperands());
     for (unsigned argIdx = 0; argIdx < maxArgIdx; ++argIdx) {
       Value yielded = terminator->getOperand(argIdx);
@@ -253,15 +234,9 @@ void UBUsageOptPass::buildUBUsageGraph(
     }
   }
 
-  for (Operation &blockOp : block->without_terminator()) {
-    // Yield only forwards values. Loop-carried edges are modeled at their
-    // users.
+  for (Operation &blockOp : *block) {
     int dstNode = getOrCreateNodeId(&blockOp);
-    // Consider nestedOp in blockOp, such as scf.if, scf.for, scf.while, etc.
     blockOp.walk([&](Operation *op) {
-      if (isa<scf::YieldOp>(op)) {
-        return;
-      }
       for (Value operand : op->getOperands()) {
         Operation *srcInBlock = nullptr;
         bool fromArgEdge = false;
@@ -274,9 +249,21 @@ void UBUsageOptPass::buildUBUsageGraph(
             continue;
           }
         } else if (auto blockArg = dyn_cast<BlockArgument>(operand)) {
-          srcInBlock = CVPipeline::getLoopCarriedDefOp(blockArg, block);
-          if (srcInBlock) {
-            fromArgEdge = true;
+          if (blockArg.getOwner() == block && terminator &&
+              isa<scf::YieldOp>(terminator)) {
+            unsigned numArgs = block->getNumArguments();
+            unsigned numYieldOperands = terminator->getNumOperands();
+            // for op offset=1, while op offset=0
+            int offset = (int)numArgs - (int)numYieldOperands;
+            int argIdx = (int)blockArg.getArgNumber() - offset;
+
+            if (argIdx >= 0 && argIdx < (int)numYieldOperands) {
+              Value yielded = terminator->getOperand(argIdx);
+              if (Operation *yieldDefOp = yielded.getDefiningOp()) {
+                srcInBlock = CVPipeline::getAncestorInBlock(yieldDefOp, block);
+                fromArgEdge = true;
+              }
+            }
           }
         }
         if (!srcInBlock || srcInBlock->getBlock() != block) {
@@ -300,7 +287,7 @@ void UBUsageOptPass::buildUBUsageGraph(
           LOG_DEBUG("Add SSA edage from " << *srcInBlock << " to " << blockOp
                                           << "\nweight = " << edgeSize << "\n");
         }
-        addEdge(srcNode, dstNode, edgeSize, fromArgEdge);
+        addEdge(srcNode, dstNode, edgeSize);
       }
 
       for (auto memDef : memGraph.getExecBefore(op)) {
@@ -368,13 +355,16 @@ static bool isActiveEndNode(int srcNode, int endNode,
                             const SmallVector<int> &nodeBlockId,
                             const SmallVector<int> &nodeCoreType,
                             DenseMap<int, Operation *> nodeId2op) {
+  int nodeNum = static_cast<int>(nodeBlockId.size());
   if (nodeCoreType[endNode] != nodeCoreType[srcNode]) {
     return false;
   }
   if (nodeBlockId[endNode] == -1) {
+    // meet scf.yield/return..
     return false;
   }
   if (nodeBlockId[srcNode] == nodeBlockId[endNode]) {
+    // same cmpute block not leaf
     return false;
   }
   // To avoid cycles: we only collect 2 kind node:
@@ -509,14 +499,10 @@ DenseMap<int, int> UBUsageOptPass::collectRecordChange(
         int64_t minUBSize = originUBSize;
         SmallVector<int> chain;
         chain.push_back(activateNode);
-        DenseSet<int> chainNodes;
-        chainNodes.insert(activateNode);
         int bestCutPointIdx = -1;
 
-        // Follow each node once: loop-carried edges can close a cycle.
-        int whileCnt = 0;
-        while (whileCnt < CVPipeline::WHILE_LOOP_LIMIT) {
-          whileCnt++;
+        // find the activate chain.
+        while (true) {
           int curNode = chain.back();
           int uniqueNextNode = -1;
           if (!findUniqueDependentNode(curNode, optBlockId, linkOut, linkIn,
@@ -525,25 +511,12 @@ DenseMap<int, int> UBUsageOptPass::collectRecordChange(
             break;
           }
 
-          if (!chainNodes.insert(uniqueNextNode).second) {
-            LOG_DEBUG("Stop activate chain at revisited node " << uniqueNextNode
-                                                               << "\n");
-            break;
-          }
           chain.push_back(uniqueNextNode);
-        }
-        if (whileCnt >= CVPipeline::WHILE_LOOP_LIMIT) {
-          LOG_DEBUG("Stop activate chain at while loop limit "
-                    << CVPipeline::WHILE_LOOP_LIMIT << "\n");
-          continue;
         }
         for (auto i = 0; i < chain.size(); i++) {
           auto nowUBSize = 0LL;
           LOG_DEBUG("now chain op = " << *nodeId2op.at(chain[i]) << "\n");
           for (auto cutEdgeId : linkOut[chain[i]]) {
-            if (linkEnd[cutEdgeId] == chain[i]) {
-              continue;
-            }
             if (linkSize[cutEdgeId] == MAX_EDGE_SIZE) {
               nowUBSize = MAX_EDGE_SIZE;
               break;
@@ -617,7 +590,8 @@ bool applyRecordChange(DenseMap<int, int> &recordChange,
 llvm::LogicalResult UBUsageOptPass::UBUsageOptimization(
     Block *block, const CVPipeline::MemoryDependenceGraph &memGraph,
     CVPipeline::ComputeBlockIdManager &bm) {
-  if (!isa<scf::ForOp, scf::WhileOp, scf::IfOp>(block->getParentOp())) {
+  if (!(isa<scf::ForOp>(block->getParentOp()) ||
+        isa<scf::WhileOp>(block->getParentOp()))) {
     return llvm::success();
   }
   DenseMap<Operation *, int> op2nodeId;
