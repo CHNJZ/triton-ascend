@@ -1,4 +1,5 @@
 """Host tests: no device, HAL or MSPTI library is required."""
+import json
 import struct
 import sys
 from types import SimpleNamespace
@@ -6,6 +7,29 @@ from types import SimpleNamespace
 import pytest
 
 monitor = pytest.importorskip("triton.profiler.ascend_perf_monitor")
+
+
+@pytest.mark.parametrize("collection", ["perf_monitor", "a5_perf_monitor", "mspti"])
+def test_perf_monitor_metadata_dispatch(collection, tmp_path, monkeypatch):
+    from triton.profiler.hooks import instrumentation
+
+    calls = []
+    monkeypatch.setattr(instrumentation, "_get_backend_name", lambda: "ascend")
+    monkeypatch.delenv("PROTON_INSTRUMENTATION_WARMUP_LAUNCHES", raising=False)
+    monkeypatch.setattr(instrumentation.libproton, "init_function_metadata", lambda *args: None)
+    monkeypatch.setattr(instrumentation.libproton, "record_instrumentation_events", lambda f, rows: calls.append(f))
+    monkeypatch.setattr(monitor, "PerfMonitorCollector",
+                        lambda: SimpleNamespace(start=lambda: calls.append("start"), stop=lambda: []))
+    metadata = tmp_path / "add.json"
+    metadata.write_text(
+        json.dumps(
+            {"proton_collection": collection, "proton_metadata": [{"proton": {"format_version": 2, "scopes": []}}]}))
+    hook = instrumentation.InstrumentationHook(None)
+    hook.init_handle(None, 1, "add", {"add.json": str(metadata)}, "hash")
+    launch = SimpleNamespace(data={"function": 1})
+    hook.enter(launch)
+    hook.exit(launch)
+    assert calls == ["start", 1]
 
 
 def _words(*words):
@@ -73,6 +97,6 @@ def test_stop_reads_pending_data_and_releases_driver(monkeypatch):
     assert collector.stop() == [(12, 0, 1, 2, 7, 1650)]
     assert collector.stop() == []
     collector.start()
-    with pytest.raises(RuntimeError, match="empty A5 capture"):
+    with pytest.raises(RuntimeError, match="empty performance monitor capture"):
         collector.stop()
     assert operations == [1, 2, 1, 2]
